@@ -4,10 +4,13 @@ export default function App() {
       <h1 style={styles.title}>📻 Rádio George FC Tech</h1>
       <p style={styles.live}>🔴 AO VIVO</p>
 
-      <audio
-        src="https://radiogeorgefctech.ismyradio.com/stream"
-        controls
-        autoPlay
+      <iframe
+        src="https://radiogeorgefctech.ismyradio.com/player"
+        width="100%"
+        height="120"
+        frameBorder="0"
+        scrolling="no"
+        allow="autoplay"
         style={styles.player}
       />
 
@@ -16,7 +19,7 @@ export default function App() {
       </p>
 
       <a
-        href="https://wa.me/5500000000000"
+        href="https://wa.me/5515992485695"
         target="_blank"
         style={styles.button}
         rel="noreferrer"
@@ -46,7 +49,7 @@ const styles = {
   },
   title: { fontSize: "28px", fontWeight: "bold" },
   live: { color: "red", fontWeight: "bold" },
-  player: { width: "100%", maxWidth: "320px" },
+  player: { maxWidth: "360px" },
   text: { opacity: 0.8 },
   button: {
     background: "#1db954",
