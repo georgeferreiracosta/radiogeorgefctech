@@ -2,55 +2,68 @@ import React, { useState, useEffect, useRef } from 'react';
 
 export default function App() {
   const [isPlaying, setIsPlaying] = useState(false);
-  const [volume, setVolume] = useState(80);
+  const [volume, setVolume] = useState(50);
   const [currentTime, setCurrentTime] = useState(new Date());
-  const [listeners, setListeners] = useState(125);
-  const [spectrumEffect, setSpectrumEffect] = useState(1);
-  const [currentTrack, setCurrentTrack] = useState("Rádio George FC Tech - Transmissão Ao Vivo");
+  const [listeners, setListeners] = useState(245);
+  const [currentTrack, setCurrentTrack] = useState("Rádio George FC Tech");
+  const [artist, setArtist] = useState("Rádio George FC Tech");
+  const [songTitle, setSongTitle] = useState("Transmissão Ao Vivo");
   const [bitrate, setBitrate] = useState("128kbps");
   const [audioContext, setAudioContext] = useState(null);
-  const [audioData, setAudioData] = useState(new Uint8Array(128));
-  const [connectionStatus, setConnectionStatus] = useState("Conectando...");
-  const [showSettings, setShowSettings] = useState(false);
+  const [connectionStatus, setConnectionStatus] = useState("Pausado");
   const [audioError, setAudioError] = useState(null);
+  const [bassIntensity, setBassIntensity] = useState(0);
+  const [trebleIntensity, setTrebleIntensity] = useState(0);
+  const [peakFrequency, setPeakFrequency] = useState(0);
+  const [showRequestModal, setShowRequestModal] = useState(false);
+  const [requestForm, setRequestForm] = useState({
+    name: '',
+    song: '',
+    artist: '',
+    message: ''
+  });
+  const [realTimeTrack, setRealTimeTrack] = useState(null);
 
   const audioRef = useRef(null);
   const canvasRef = useRef(null);
   const animationRef = useRef(null);
   const analyserRef = useRef(null);
   const sourceRef = useRef(null);
+  const dataArrayRef = useRef(null);
 
   // Stream URL direta do Caster.fm
   const STREAM_URL = "https://sapircast.caster.fm:19793/UYD7q?token=db0dd6f14c9c1e8b552206f015912820";
 
-  // Efeitos de spectrum disponíveis
-  const spectrumEffects = [
-    { id: 1, name: "Barras Clássicas", color: "#6C2BDD" },
-    { id: 2, name: "Ondas Suaves", color: "#25D366" },
-    { id: 3, name: "Partículas", color: "#FF6B6B" },
-    { id: 4, name: "Anéis Concêntricos", color: "#4ECDC4" },
-    { id: 5, name: "Espiral", color: "#FFD93D" },
-    { id: 6, name: "Matrix", color: "#00FF00" },
-    { id: 7, name: "Fogo", color: "#FF4500" },
-    { id: 8, name: "Água", color: "#1E90FF" },
-    { id: 9, name: "Neón", color: "#FF00FF" },
-    { id: 10, name: "Arco-íris", color: "rainbow" }
-  ];
-
-  // Atualizar hora atual e ouvintes
+  // Atualizar hora atual
   useEffect(() => {
     const timer = setInterval(() => {
       setCurrentTime(new Date());
-      
-      // Simular variação de ouvintes (em produção, buscaria da API)
-      setListeners(prev => {
-        const change = Math.floor(Math.random() * 20) - 8;
-        return Math.max(50, prev + change);
-      });
-    }, 30000);
+    }, 1000);
     
     return () => clearInterval(timer);
   }, []);
+
+  // Simular ouvintes em tempo real
+  useEffect(() => {
+    const listenerInterval = setInterval(() => {
+      if (isPlaying) {
+        const baseListeners = 245;
+        const hour = new Date().getHours();
+        let multiplier = 1;
+        
+        if (hour >= 8 && hour <= 10) multiplier = 1.5;
+        else if (hour >= 12 && hour <= 14) multiplier = 1.8;
+        else if (hour >= 18 && hour <= 22) multiplier = 2.2;
+        
+        const randomChange = Math.floor(Math.random() * 30) - 10;
+        const newListeners = Math.max(100, Math.floor(baseListeners * multiplier + randomChange));
+        
+        setListeners(newListeners);
+      }
+    }, 15000);
+    
+    return () => clearInterval(listenerInterval);
+  }, [isPlaying]);
 
   // Inicializar Web Audio API quando player tocar
   useEffect(() => {
@@ -61,7 +74,7 @@ export default function App() {
         cancelAnimationFrame(animationRef.current);
       }
       if (audioContext) {
-        audioContext.close();
+        audioContext.suspend();
       }
     }
     
@@ -72,20 +85,27 @@ export default function App() {
     };
   }, [isPlaying]);
 
-  const initAudioAnalysis = () => {
+  const initAudioAnalysis = async () => {
     try {
-      const AudioContext = window.AudioContext || window.webkitAudioContext;
-      const context = new AudioContext();
-      setAudioContext(context);
-      
-      const analyser = context.createAnalyser();
-      analyser.fftSize = 256;
-      analyserRef.current = analyser;
-      
-      const source = context.createMediaElementSource(audioRef.current);
-      sourceRef.current = source;
-      source.connect(analyser);
-      analyser.connect(context.destination);
+      if (!audioContext) {
+        const AudioContext = window.AudioContext || window.webkitAudioContext;
+        const context = new AudioContext();
+        setAudioContext(context);
+        
+        const analyser = context.createAnalyser();
+        analyser.fftSize = 2048;
+        analyser.smoothingTimeConstant = 0.7;
+        analyserRef.current = analyser;
+        
+        const source = context.createMediaElementSource(audioRef.current);
+        sourceRef.current = source;
+        source.connect(analyser);
+        analyser.connect(context.destination);
+        
+        dataArrayRef.current = new Uint8Array(analyser.frequencyBinCount);
+      } else {
+        audioContext.resume();
+      }
       
       startSpectrumAnimation();
     } catch (error) {
@@ -104,18 +124,88 @@ export default function App() {
     const ctx = canvas.getContext('2d');
     const analyser = analyserRef.current;
     const bufferLength = analyser.frequencyBinCount;
-    const dataArray = new Uint8Array(bufferLength);
+    const dataArray = dataArrayRef.current || new Uint8Array(bufferLength);
 
     const draw = () => {
       animationRef.current = requestAnimationFrame(draw);
       analyser.getByteFrequencyData(dataArray);
-      setAudioData(new Uint8Array(dataArray));
+      
+      // Calcular intensidades
+      const bass = calculateFrequencyIntensity(dataArray, 0, 50);
+      const treble = calculateFrequencyIntensity(dataArray, 100, 255);
+      const peak = findPeakFrequency(dataArray);
+      
+      setBassIntensity(bass);
+      setTrebleIntensity(treble);
+      setPeakFrequency(peak);
       
       ctx.clearRect(0, 0, canvas.width, canvas.height);
-      drawSpectrumEffect(ctx, canvas, dataArray, spectrumEffect);
+      drawVUMeter(ctx, canvas, dataArray);
     };
     
     draw();
+  };
+
+  const calculateFrequencyIntensity = (data, start, end) => {
+    let sum = 0;
+    for (let i = start; i < end && i < data.length; i++) {
+      sum += data[i];
+    }
+    return sum / (end - start) / 255;
+  };
+
+  const findPeakFrequency = (data) => {
+    let peak = 0;
+    let peakValue = 0;
+    for (let i = 0; i < data.length; i++) {
+      if (data[i] > peakValue) {
+        peakValue = data[i];
+        peak = i;
+      }
+    }
+    return peak;
+  };
+
+  const drawVUMeter = (ctx, canvas, data) => {
+    const width = canvas.width;
+    const height = canvas.height;
+    const barCount = 64;
+    const barWidth = width / barCount;
+    const spacing = barWidth * 0.1;
+    const effectiveWidth = barWidth - spacing;
+    
+    for (let i = 0; i < barCount; i++) {
+      const dataIndex = Math.floor((i / barCount) * data.length);
+      const barHeight = (data[dataIndex] / 255) * height;
+      const x = i * barWidth + spacing / 2;
+      const y = height - barHeight;
+      
+      // Determinar cor baseada na altura (LED style)
+      let color;
+      if (barHeight < height * 0.3) {
+        color = '#25D366'; // Verde - baixa intensidade
+      } else if (barHeight < height * 0.7) {
+        color = '#FFD93D'; // Amarelo - média intensidade
+      } else {
+        color = '#FF4757'; // Vermelho - alta intensidade
+      }
+      
+      // Desenhar barra com gradiente
+      const gradient = ctx.createLinearGradient(0, y, 0, height);
+      gradient.addColorStop(0, color);
+      gradient.addColorStop(1, lightenColor(color, 30));
+      
+      ctx.fillStyle = gradient;
+      ctx.fillRect(x, y, effectiveWidth, barHeight);
+      
+      // Brilho no topo
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.3)';
+      ctx.fillRect(x, y, effectiveWidth, 2);
+      
+      // Sombra na base
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.2)';
+      ctx.fillRect(x, height - 1, effectiveWidth, 1);
+    }
   };
 
   const startSimulatedSpectrum = () => {
@@ -123,335 +213,36 @@ export default function App() {
     if (!canvas) return;
     
     const ctx = canvas.getContext('2d');
-    const bufferLength = 128;
+    const bufferLength = 64;
     const simulatedData = new Uint8Array(bufferLength);
+    let time = 0;
     
     const draw = () => {
       animationRef.current = requestAnimationFrame(draw);
+      time += 0.03;
       
-      // Gerar dados simulados
-      const time = Date.now() / 1000;
+      // Gerar dados simulados para VU meter
       for (let i = 0; i < bufferLength; i++) {
-        const wave1 = Math.sin(time * 2 + i * 0.2) * 50;
-        const wave2 = Math.sin(time * 3 + i * 0.15) * 30;
-        const wave3 = Math.sin(time * 1.5 + i * 0.3) * 20;
+        const frequency = i / bufferLength;
+        const wave1 = Math.sin(time * 1.5 + frequency * 10) * 60;
+        const wave2 = Math.sin(time * 2 + frequency * 15) * 40;
+        const base = 30 + (1 - frequency) * 40;
         const random = Math.random() * 15;
-        simulatedData[i] = 70 + wave1 + wave2 + wave3 + random;
+        simulatedData[i] = Math.min(255, Math.max(0, base + wave1 + wave2 + random));
       }
       
+      // Calcular intensidades
+      const bass = calculateFrequencyIntensity(simulatedData, 0, 20);
+      const treble = calculateFrequencyIntensity(simulatedData, 40, 64);
+      
+      setBassIntensity(bass);
+      setTrebleIntensity(treble);
+      
       ctx.clearRect(0, 0, canvas.width, canvas.height);
-      drawSpectrumEffect(ctx, canvas, simulatedData, spectrumEffect);
-      setAudioData(simulatedData);
+      drawVUMeter(ctx, canvas, simulatedData);
     };
     
     draw();
-  };
-
-  const drawSpectrumEffect = (ctx, canvas, data, effectId) => {
-    const width = canvas.width;
-    const height = canvas.height;
-    const bufferLength = data.length;
-    
-    switch(effectId) {
-      case 1: // Barras Clássicas
-        drawBars(ctx, width, height, data, '#6C2BDD');
-        break;
-      case 2: // Ondas Suaves
-        drawWave(ctx, width, height, data, '#25D366');
-        break;
-      case 3: // Partículas
-        drawParticles(ctx, width, height, data, '#FF6B6B');
-        break;
-      case 4: // Anéis Concêntricos
-        drawCircles(ctx, width, height, data, '#4ECDC4');
-        break;
-      case 5: // Espiral
-        drawSpiral(ctx, width, height, data, '#FFD93D');
-        break;
-      case 6: // Matrix
-        drawMatrix(ctx, width, height, data, '#00FF00');
-        break;
-      case 7: // Fogo
-        drawFire(ctx, width, height, data, '#FF4500');
-        break;
-      case 8: // Água
-        drawWater(ctx, width, height, data, '#1E90FF');
-        break;
-      case 9: // Neón
-        drawNeon(ctx, width, height, data, '#FF00FF');
-        break;
-      case 10: // Arco-íris
-        drawRainbow(ctx, width, height, data);
-        break;
-      default:
-        drawBars(ctx, width, height, data, '#6C2BDD');
-    }
-  };
-
-  // Funções de desenho para cada efeito
-  const drawBars = (ctx, width, height, data, color) => {
-    const barWidth = (width / data.length) * 2.5;
-    let x = 0;
-    
-    const gradient = ctx.createLinearGradient(0, 0, 0, height);
-    gradient.addColorStop(0, color);
-    gradient.addColorStop(1, lightenColor(color, 50));
-    ctx.fillStyle = gradient;
-    
-    for (let i = 0; i < data.length; i++) {
-      const barHeight = (data[i] / 255) * height;
-      
-      // Barra principal
-      ctx.fillRect(x, height - barHeight, barWidth, barHeight);
-      
-      // Brilho no topo
-      ctx.fillStyle = 'rgba(255, 255, 255, 0.4)';
-      ctx.fillRect(x, height - barHeight, barWidth, 2);
-      ctx.fillStyle = gradient;
-      
-      x += barWidth + 1;
-    }
-  };
-
-  const drawWave = (ctx, width, height, data, color) => {
-    ctx.beginPath();
-    ctx.moveTo(0, height / 2);
-    
-    for (let i = 0; i < data.length; i++) {
-      const x = (i / data.length) * width;
-      const amplitude = (data[i] / 255) * (height / 2);
-      const y = height / 2 + Math.sin(Date.now() / 1000 + i * 0.1) * amplitude;
-      
-      ctx.lineTo(x, y);
-    }
-    
-    ctx.strokeStyle = color;
-    ctx.lineWidth = 3;
-    ctx.stroke();
-    
-    // Preenchimento gradiente
-    ctx.lineTo(width, height);
-    ctx.lineTo(0, height);
-    ctx.closePath();
-    
-    const gradient = ctx.createLinearGradient(0, 0, 0, height);
-    gradient.addColorStop(0, color + '80');
-    gradient.addColorStop(1, color + '20');
-    ctx.fillStyle = gradient;
-    ctx.fill();
-  };
-
-  const drawParticles = (ctx, width, height, data, color) => {
-    const particleCount = data.length;
-    
-    for (let i = 0; i < particleCount; i++) {
-      const x = (i / particleCount) * width;
-      const y = height - (data[i] / 255) * height;
-      const size = (data[i] / 255) * 10 + 2;
-      
-      // Partícula central
-      ctx.beginPath();
-      ctx.arc(x, y, size, 0, Math.PI * 2);
-      ctx.fillStyle = color;
-      ctx.fill();
-      
-      // Aura ao redor
-      ctx.beginPath();
-      ctx.arc(x, y, size * 2, 0, Math.PI * 2);
-      ctx.strokeStyle = color + '40';
-      ctx.lineWidth = 1;
-      ctx.stroke();
-      
-      // Rastro
-      for (let j = 1; j <= 3; j++) {
-        ctx.beginPath();
-        ctx.arc(x, y + j * 5, size * 0.7, 0, Math.PI * 2);
-        ctx.fillStyle = color + Math.floor(40 - j * 10).toString(16);
-        ctx.fill();
-      }
-    }
-  };
-
-  const drawCircles = (ctx, width, height, data, color) => {
-    const centerX = width / 2;
-    const centerY = height / 2;
-    const maxRadius = Math.min(width, height) / 2 - 20;
-    
-    for (let i = 0; i < data.length; i += 4) {
-      const radius = (data[i] / 255) * maxRadius;
-      const opacity = data[i] / 255;
-      
-      ctx.beginPath();
-      ctx.arc(centerX, centerY, radius, 0, Math.PI * 2);
-      ctx.strokeStyle = color.replace(')', `, ${opacity})`).replace('rgb', 'rgba');
-      ctx.lineWidth = 2;
-      ctx.stroke();
-    }
-  };
-
-  const drawSpiral = (ctx, width, height, data, color) => {
-    const centerX = width / 2;
-    const centerY = height / 2;
-    const maxRadius = Math.min(width, height) / 2;
-    
-    ctx.beginPath();
-    
-    for (let i = 0; i < data.length; i++) {
-      const angle = (i / data.length) * Math.PI * 8;
-      const radius = (data[i] / 255) * maxRadius + 10;
-      const x = centerX + Math.cos(angle) * radius;
-      const y = centerY + Math.sin(angle) * radius;
-      
-      if (i === 0) {
-        ctx.moveTo(x, y);
-      } else {
-        ctx.lineTo(x, y);
-      }
-    }
-    
-    ctx.strokeStyle = color;
-    ctx.lineWidth = 2;
-    ctx.stroke();
-  };
-
-  const drawMatrix = (ctx, width, height, data, color) => {
-    const cols = 20;
-    const rows = 10;
-    const cellWidth = width / cols;
-    const cellHeight = height / rows;
-    
-    for (let col = 0; col < cols; col++) {
-      for (let row = 0; row < rows; row++) {
-        const index = (col * rows + row) % data.length;
-        const intensity = data[index] / 255;
-        
-        // Caractere "matrix"
-        ctx.fillStyle = `rgba(0, 255, 0, ${intensity})`;
-        ctx.font = `${cellHeight * 0.8}px monospace`;
-        ctx.fillText(
-          String.fromCharCode(48 + Math.floor(Math.random() * 74)),
-          col * cellWidth,
-          row * cellHeight + cellHeight * 0.8
-        );
-      }
-    }
-  };
-
-  const drawFire = (ctx, width, height, data, color) => {
-    const gradient = ctx.createLinearGradient(0, height, 0, 0);
-    gradient.addColorStop(0, '#FF4500');
-    gradient.addColorStop(0.5, '#FF8C00');
-    gradient.addColorStop(1, '#FFFF00');
-    
-    for (let i = 0; i < data.length; i++) {
-      const x = (i / data.length) * width;
-      const flameHeight = (data[i] / 255) * height * 0.8;
-      
-      // Chama
-      ctx.beginPath();
-      ctx.moveTo(x, height);
-      ctx.bezierCurveTo(
-        x + 10, height - flameHeight * 0.3,
-        x - 10, height - flameHeight * 0.7,
-        x, height - flameHeight
-      );
-      ctx.bezierCurveTo(
-        x + 10, height - flameHeight * 0.7,
-        x - 10, height - flameHeight * 0.3,
-        x, height
-      );
-      ctx.closePath();
-      
-      ctx.fillStyle = gradient;
-      ctx.fill();
-    }
-  };
-
-  const drawWater = (ctx, width, height, data, color) => {
-    const waveCount = 3;
-    
-    for (let wave = 0; wave < waveCount; wave++) {
-      ctx.beginPath();
-      ctx.moveTo(0, height * 0.7);
-      
-      for (let i = 0; i < width; i += 5) {
-        const dataIndex = Math.floor((i / width) * data.length);
-        const waveHeight = (data[dataIndex] / 255) * 30;
-        const y = height * 0.7 + 
-                  Math.sin(i * 0.02 + Date.now() / 1000 + wave) * waveHeight;
-        
-        ctx.lineTo(i, y);
-      }
-      
-      ctx.lineTo(width, height);
-      ctx.lineTo(0, height);
-      ctx.closePath();
-      
-      const opacity = 0.3 + (wave * 0.2);
-      ctx.fillStyle = color.replace(')', `, ${opacity})`).replace('rgb', 'rgba');
-      ctx.fill();
-    }
-  };
-
-  const drawNeon = (ctx, width, height, data, color) => {
-    ctx.shadowBlur = 20;
-    ctx.shadowColor = color;
-    
-    // Linhas de neón
-    ctx.beginPath();
-    for (let i = 0; i < data.length; i++) {
-      const x = (i / data.length) * width;
-      const y = height - (data[i] / 255) * height;
-      
-      if (i === 0) {
-        ctx.moveTo(x, y);
-      } else {
-        ctx.lineTo(x, y);
-      }
-    }
-    
-    ctx.strokeStyle = color;
-    ctx.lineWidth = 3;
-    ctx.stroke();
-    
-    // Pontos de neón
-    for (let i = 0; i < data.length; i += 4) {
-      const x = (i / data.length) * width;
-      const y = height - (data[i] / 255) * height;
-      
-      ctx.beginPath();
-      ctx.arc(x, y, 4, 0, Math.PI * 2);
-      ctx.fillStyle = color;
-      ctx.fill();
-    }
-    
-    ctx.shadowBlur = 0;
-  };
-
-  const drawRainbow = (ctx, width, height, data) => {
-    const colors = [
-      '#FF0000', '#FF7F00', '#FFFF00',
-      '#00FF00', '#0000FF', '#4B0082', '#9400D3'
-    ];
-    
-    const barWidth = (width / data.length) * 2.5;
-    let x = 0;
-    
-    for (let i = 0; i < data.length; i++) {
-      const barHeight = (data[i] / 255) * height;
-      const colorIndex = Math.floor((i / data.length) * colors.length);
-      const color = colors[colorIndex];
-      
-      // Barra colorida
-      ctx.fillStyle = color;
-      ctx.fillRect(x, height - barHeight, barWidth, barHeight);
-      
-      // Brilho
-      ctx.fillStyle = 'rgba(255, 255, 255, 0.3)';
-      ctx.fillRect(x, height - barHeight, barWidth, 2);
-      
-      x += barWidth + 1;
-    }
   };
 
   const lightenColor = (color, percent) => {
@@ -478,21 +269,24 @@ export default function App() {
         // Configurar áudio
         audioRef.current.src = STREAM_URL;
         audioRef.current.volume = volume / 100;
+        audioRef.current.crossOrigin = "anonymous";
         
         // Tentar tocar
         await audioRef.current.play();
         
         setIsPlaying(true);
-        setConnectionStatus("Conectado");
+        setConnectionStatus("Tocando");
         setAudioError(null);
         
-        // Simular informações da música
-        simulateTrackInfo();
+        // Atualizar informações da rádio
+        setArtist("Rádio George FC Tech");
+        setSongTitle("Transmissão Ao Vivo");
+        setCurrentTrack("Rádio George FC Tech - Transmissão Ao Vivo");
         
       } catch (error) {
         console.error('Erro ao reproduzir:', error);
         setAudioError("Não foi possível conectar à transmissão. Tente novamente.");
-        setConnectionStatus("Erro de conexão");
+        setConnectionStatus("Erro");
         setIsPlaying(false);
         
         // Iniciar spectrum simulado
@@ -505,58 +299,6 @@ export default function App() {
     }
   };
 
-  const simulateTrackInfo = () => {
-    const tracks = [
-      "George FC Tech - Mix Eletrônico",
-      "Música Popular Brasileira",
-      "Tech Podcast - Inovações Digitais",
-      "Pop Internacional - Top Hits",
-      "Clássicos do Rock Mundial",
-      "Jazz & Blues Especial",
-      "Música Eletrônica Progressive",
-      "Hip Hop Internacional",
-      "Reggae & World Music",
-      "MPB Atual"
-    ];
-    
-    const artists = [
-      "DJ George Mastermix",
-      "Ana Tech & Convidados",
-      "Tech News Network",
-      "International Hits FM",
-      "Rock Legends Radio",
-      "Jazz Masters",
-      "Progressive Beats",
-      "Hip Hop Central",
-      "World Sound System",
-      "MPB Connection"
-    ];
-    
-    // Mudar música a cada 30 segundos
-    let trackIndex = 0;
-    const interval = setInterval(() => {
-      if (!isPlaying) {
-        clearInterval(interval);
-        return;
-      }
-      
-      trackIndex = (trackIndex + 1) % tracks.length;
-      setCurrentTrack(`${tracks[trackIndex]} - ${artists[trackIndex]}`);
-    }, 30000);
-    
-    // Primeira música
-    setCurrentTrack(`${tracks[0]} - ${artists[0]}`);
-    
-    return () => clearInterval(interval);
-  };
-
-  const toggleMute = () => {
-    if (audioRef.current) {
-      audioRef.current.muted = !audioRef.current.muted;
-      setMuted(audioRef.current.muted);
-    }
-  };
-
   const handleVolumeChange = (e) => {
     const newVolume = parseInt(e.target.value);
     setVolume(newVolume);
@@ -565,23 +307,135 @@ export default function App() {
     }
   };
 
-  const changeSpectrumEffect = (effectId) => {
-    setSpectrumEffect(effectId);
+  const toggleMute = () => {
+    if (audioRef.current) {
+      audioRef.current.muted = !audioRef.current.muted;
+    }
   };
 
   const formatTime = (date) => {
-    return date.toLocaleTimeString('pt-BR', { 
-      hour: '2-digit', 
-      minute: '2-digit',
-      second: '2-digit'
+    return date.toLocaleTimeString('pt-BR', {
+      hour: '2-digit',
+      minute: '2-digit'
     });
   };
 
+  // Funções para pedido de músicas
+  const sendToWhatsApp = (formData) => {
+    const message = `🎵 *PEDIDO DE MÚSICA - RÁDIO GEORGE FC TECH* 🎵
+  
+━━━━━━━━━━━━━━━━━━━━━━
+👤 *Solicitante:* ${formData.name}
+
+🎶 *Música:* ${formData.song}
+
+🎤 *Artista:* ${formData.artist}
+
+${formData.message ? `💬 *Mensagem/Dedicação:*\n${formData.message}\n` : ''}
+━━━━━━━━━━━━━━━━━━━━━━
+⏰ _Enviado em: ${new Date().toLocaleString('pt-BR')}_
+📻 _Via: Rádio George FC Tech Online_`;
+
+    // Formatar a mensagem para URL
+    const encodedMessage = encodeURIComponent(message);
+    
+    // SEU número de WhatsApp (formatado: 55 + DDD + número)
+    const whatsappNumber = '5515992485695';
+    const whatsappUrl = `https://wa.me/${whatsappNumber}?text=${encodedMessage}`;
+    
+    // Abrir WhatsApp em nova aba
+    window.open(whatsappUrl, '_blank');
+  };
+
+  const handleRequestSubmit = (e) => {
+    e.preventDefault();
+    
+    // Validação básica
+    if (!requestForm.name.trim() || !requestForm.song.trim() || !requestForm.artist.trim()) {
+      alert('Por favor, preencha todos os campos obrigatórios!');
+      return;
+    }
+    
+    // Enviar para WhatsApp
+    sendToWhatsApp(requestForm);
+    
+    alert('📱 Abrindo WhatsApp para enviar seu pedido!\n\nPor favor, confirme o envio na conversa do WhatsApp.');
+    setShowRequestModal(false);
+    setRequestForm({ name: '', song: '', artist: '', message: '' });
+  };
+
+  const handleRequestChange = (e) => {
+    setRequestForm({
+      ...requestForm,
+      [e.target.name]: e.target.value
+    });
+  };
+
+  // Funções para redes sociais
+  const openSocialLink = (platform) => {
+    const links = {
+      facebook: 'https://www.facebook.com/radiogeorgefctech',
+      instagram: 'https://www.instagram.com/radiogeorgefctech',
+      twitter: 'https://www.x.com/radiogeorgefctech', // Alterado para X
+      youtube: 'https://www.youtube.com/radiogeorgefctech',
+      whatsapp: 'https://wa.me/5515992485695?text=Olá! Gostaria de pedir uma música na Rádio George FC Tech'
+    };
+
+    if (links[platform]) {
+      window.open(links[platform], '_blank');
+    }
+  };
+
   const getListenerColor = () => {
-    if (listeners > 200) return "#25D366";
-    if (listeners > 100) return "#FFD93D";
+    if (listeners > 300) return "#1DB954"; // Spotify green
+    if (listeners > 200) return "#FFD93D";
     return "#FF6B6B";
   };
+
+  // Buscar informações da música em tempo real
+  const fetchRealTimeTrack = async () => {
+    try {
+      // Endpoint do Icecast/Shoutcast para informações da transmissão
+      const response = await fetch('https://sapircast.caster.fm:19793/status-json.xsl');
+      const data = await response.json();
+
+      if (data.icestats && data.icestats.source && data.icestats.source.title) {
+        const currentTrack = data.icestats.source.title;
+        const [artist, title] = currentTrack.split(' - ');
+
+        setRealTimeTrack({
+          artist: artist || 'Rádio George FC Tech',
+          title: title || currentTrack,
+          fullTitle: currentTrack,
+          genre: 'Ao Vivo',
+          bitrate: data.icestats.source.bitrate || '128kbps'
+        });
+
+        // Atualizar informações de exibição
+        setArtist(artist || 'Rádio George FC Tech');
+        setSongTitle(title || currentTrack);
+        setCurrentTrack(currentTrack);
+        setBitrate(data.icestats.source.bitrate || '128kbps');
+      }
+    } catch (error) {
+      console.error('Erro ao buscar informações da música:', error);
+      // Manter informações padrão da rádio
+      setRealTimeTrack({
+        artist: 'Rádio George FC Tech',
+        title: 'Transmissão Ao Vivo',
+        fullTitle: 'Rádio George FC Tech - Transmissão Ao Vivo',
+        genre: 'Ao Vivo',
+        bitrate: '128kbps'
+      });
+    }
+  };
+
+  // Atualizar informações da música em tempo real
+  useEffect(() => {
+    fetchRealTimeTrack();
+    const interval = setInterval(fetchRealTimeTrack, 30000); // Atualizar a cada 30 segundos
+    return () => clearInterval(interval);
+  }, []);
 
   return (
     <div style={styles.container}>
@@ -602,7 +456,7 @@ export default function App() {
         }}
       />
 
-      {/* Header */}
+      {/* Header Spotify-style */}
       <header style={styles.header}>
         <div style={styles.headerContent}>
           <div style={styles.logoSection}>
@@ -610,7 +464,7 @@ export default function App() {
               <div style={styles.logoIcon}>🎧</div>
               <div style={styles.logoText}>
                 <h1 style={styles.title}>Rádio George FC Tech</h1>
-                <p style={styles.subtitle}>Música • Tecnologia • Informação • 24/7</p>
+                <p style={styles.subtitle}>Transmissão Ao Vivo • 24/7</p>
               </div>
             </div>
           </div>
@@ -635,12 +489,12 @@ export default function App() {
             </div>
             
             <div style={styles.statItem}>
-              <div style={styles.statIcon}>📡</div>
+              <div style={styles.statIcon}>📶</div>
               <div style={styles.statInfo}>
                 <div style={styles.statLabel}>STATUS</div>
                 <div style={{
                   ...styles.statValue,
-                  color: connectionStatus === "Conectado" ? "#25D366" : 
+                  color: connectionStatus === "Tocando" ? "#1DB954" : 
                          connectionStatus === "Conectando..." ? "#FFD93D" : "#FF6B6B"
                 }}>
                   {connectionStatus}
@@ -652,112 +506,146 @@ export default function App() {
       </header>
 
       <main style={styles.main}>
-        {/* Spectrum Visualizer */}
-        <div 
-          style={styles.spectrumContainer}
-          onClick={togglePlay}
-          title="Clique para play/pause"
-        >
-          <canvas
-            ref={canvasRef}
-            width={1200}
-            height={300}
-            style={styles.spectrumCanvas}
-          />
-          
-          <div style={styles.spectrumOverlay}>
-            <div style={styles.spectrumTitle}>
-              {isPlaying ? "🎵 TOCANDO AGORA" : "⏸️ PAUSADO"}
+        {/* Player Principal - Spotify Style */}
+        <div style={styles.playerContainer}>
+          {/* Informações da Música */}
+          <div style={styles.trackInfoContainer}>
+            <div style={styles.albumArtPlaceholder}>
+              <div style={styles.albumArtIcon}>📻</div>
+              <div style={styles.albumArtGlow}></div>
             </div>
-            <div style={styles.spectrumTrack}>{currentTrack}</div>
-            <div style={styles.spectrumStats}>
-              <span style={styles.spectrumStat}>🎧 {listeners} ouvintes</span>
-              <span style={styles.spectrumStat}>⚡ {bitrate}</span>
-              <span style={styles.spectrumStat}>🔊 {volume}%</span>
+            
+            <div style={styles.trackDetails}>
+              <div style={styles.trackTitle}>
+                {realTimeTrack?.title || "Transmissão Ao Vivo"}
+              </div>
+              <div style={styles.trackArtist}>
+                {realTimeTrack?.artist || "Rádio George FC Tech"}
+              </div>
+
+              <div style={styles.fileName}>
+                <span style={styles.fileIcon}>🔴</span>
+                <span style={styles.fileNameText}>
+                  {realTimeTrack?.fullTitle || "stream_ao_vivo.mp3"}
+                </span>
+              </div>
+
+              <div style={styles.trackMeta}>
+                <span style={styles.genreTag}>
+                  {realTimeTrack?.genre || "Ao Vivo"}
+                </span>
+                <span style={styles.bitrateTag}>⚡ {bitrate}</span>
+                <span style={styles.liveTag}>🔴 AO VIVO</span>
+              </div>
             </div>
           </div>
-        </div>
 
-        {/* Player Controls */}
-        <div style={styles.controlsContainer}>
-          <div style={styles.mainControls}>
-            <button 
-              onClick={togglePlay}
-              style={{
-                ...styles.playButton,
-                ...(isPlaying ? styles.pauseButton : {})
-              }}
-            >
-              <span style={styles.buttonIcon}>
-                {isPlaying ? "⏸️" : "▶️"}
-              </span>
-              <span style={styles.buttonText}>
-                {isPlaying ? "PAUSAR" : "TOCAR RÁDIO"}
-              </span>
-            </button>
-            
-            <div style={styles.volumeSection}>
+          {/* VU Meter */}
+          <div style={styles.vuContainer}>
+            <canvas
+              ref={canvasRef}
+              width={800}
+              height={60}
+              style={styles.vuCanvas}
+            />
+          </div>
+
+          {/* Controles do Player */}
+          <div style={styles.controlsContainer}>
+            {/* Botões de controle */}
+            <div style={styles.playbackControls}>
+              <button 
+                onClick={togglePlay}
+                style={styles.playButton}
+                title={isPlaying ? "Pausar" : "Tocar"}
+              >
+                <span style={styles.playIcon}>
+                  {isPlaying ? "⏸️" : "▶️"}
+                </span>
+              </button>
+            </div>
+
+            {/* Controle de volume */}
+            <div style={styles.volumeContainer}>
               <button 
                 onClick={toggleMute}
-                style={styles.muteButton}
+                style={styles.volumeButton}
                 title={audioRef.current?.muted ? "Ativar som" : "Mutar"}
               >
-                <span style={styles.buttonIcon}>
+                <span style={styles.volumeIcon}>
                   {audioRef.current?.muted ? "🔇" : volume > 50 ? "🔊" : "🔈"}
                 </span>
               </button>
               
-              <input
-                type="range"
-                min="0"
-                max="100"
-                value={volume}
-                onChange={handleVolumeChange}
-                style={styles.volumeSlider}
-                aria-label="Volume"
-              />
+              <div style={styles.volumeSliderContainer}>
+                <input
+                  type="range"
+                  min="0"
+                  max="100"
+                  value={volume}
+                  onChange={handleVolumeChange}
+                  style={styles.volumeSlider}
+                  aria-label="Volume"
+                />
+                <div style={styles.volumeBarBackground}>
+                  <div style={{
+                    ...styles.volumeBarFill,
+                    width: `${volume}%`
+                  }}></div>
+                </div>
+              </div>
               
               <span style={styles.volumeValue}>{volume}%</span>
             </div>
-            
-            <button 
-              onClick={() => setShowSettings(!showSettings)}
-              style={styles.settingsButton}
-              title="Configurações do spectrum"
-            >
-              <span style={styles.buttonIcon}>⚙️</span>
-              <span style={styles.buttonText}>EFEITOS</span>
-            </button>
           </div>
 
-          {/* Spectrum Effects Selector */}
-          {showSettings && (
-            <div style={styles.effectsPanel}>
-              <h4 style={styles.effectsTitle}>🎨 Efeitos de Spectrum</h4>
-              <div style={styles.effectsGrid}>
-                {spectrumEffects.map(effect => (
-                  <button
-                    key={effect.id}
-                    onClick={() => changeSpectrumEffect(effect.id)}
-                    style={{
-                      ...styles.effectButton,
-                      ...(spectrumEffect === effect.id ? styles.effectButtonActive : {}),
-                      borderColor: effect.color === 'rainbow' ? '#6C2BDD' : effect.color
-                    }}
-                    title={effect.name}
-                  >
-                    <div style={{
-                      ...styles.effectPreview,
-                      background: effect.color === 'rainbow' 
-                        ? 'linear-gradient(45deg, #FF0000, #FF7F00, #FFFF00, #00FF00, #0000FF, #4B0082, #9400D3)'
-                        : effect.color
-                    }}></div>
-                    <span style={styles.effectName}>{effect.name}</span>
-                  </button>
-                ))}
+          {/* Indicadores de Áudio */}
+          <div style={styles.audioIndicators}>
+            <div style={styles.indicator}>
+              <div style={styles.indicatorLabel}>
+                <span style={styles.indicatorIcon}>🔴</span>
+                <span>BAIXO</span>
               </div>
+              <div style={styles.indicatorBar}>
+                <div style={{
+                  ...styles.indicatorFill,
+                  width: `${bassIntensity * 100}%`,
+                  background: 'linear-gradient(90deg, #FF4757, #FF6B6B)'
+                }}></div>
+              </div>
+              <div style={styles.indicatorValue}>{Math.floor(bassIntensity * 100)}%</div>
             </div>
-          )}
+            
+            <div style={styles.indicator}>
+              <div style={styles.indicatorLabel}>
+                <span style={styles.indicatorIcon}>🟡</span>
+                <span>MÉDIO</span>
+              </div>
+              <div style={styles.indicatorBar}>
+                <div style={{
+                  ...styles.indicatorFill,
+                  width: `${((bassIntensity + trebleIntensity) / 2 * 100)}%`,
+                  background: 'linear-gradient(90deg, #FFD93D, #FFA500)'
+                }}></div>
+              </div>
+              <div style={styles.indicatorValue}>{Math.floor(((bassIntensity + trebleIntensity) / 2 * 100))}%</div>
+            </div>
+            
+            <div style={styles.indicator}>
+              <div style={styles.indicatorLabel}>
+                <span style={styles.indicatorIcon}>🟢</span>
+                <span>AGUDO</span>
+              </div>
+              <div style={styles.indicatorBar}>
+                <div style={{
+                  ...styles.indicatorFill,
+                  width: `${trebleIntensity * 100}%`,
+                  background: 'linear-gradient(90deg, #25D366, #1DB954)'
+                }}></div>
+              </div>
+              <div style={styles.indicatorValue}>{Math.floor(trebleIntensity * 100)}%</div>
+            </div>
+          </div>
 
           {/* Error Message */}
           {audioError && (
@@ -772,52 +660,75 @@ export default function App() {
               </button>
             </div>
           )}
+        </div>
 
-          {/* Audio Information */}
-          <div style={styles.audioInfo}>
-            <div style={styles.audioInfoItem}>
-              <span style={styles.infoIcon}>🎵</span>
-              <div style={styles.infoContent}>
-                <div style={styles.infoLabel}>MÚSICA ATUAL</div>
-                <div style={styles.infoValue}>{currentTrack}</div>
-              </div>
-            </div>
-            
-            <div style={styles.audioInfoItem}>
-              <span style={styles.infoIcon}>📊</span>
-              <div style={styles.infoContent}>
-                <div style={styles.infoLabel}>EFEITO ATIVO</div>
-                <div style={styles.infoValue}>
-                  {spectrumEffects.find(e => e.id === spectrumEffect)?.name}
+        {/* Informações Ao Vivo */}
+        <div style={styles.playlistContainer}>
+          <h3 style={styles.playlistTitle}>🎵 TRANSMISSÃO AO VIVO</h3>
+
+          <div style={styles.liveTrackContainer}>
+            {realTimeTrack ? (
+              <div style={styles.liveTrackCard}>
+                <div style={styles.liveTrackHeader}>
+                  <div style={styles.liveIndicator}>
+                    <span style={styles.liveDot}></span>
+                    <span style={styles.liveText}>AO VIVO AGORA</span>
+                  </div>
+                  <div style={styles.lastUpdate}>
+                    Atualizado em tempo real
+                  </div>
+                </div>
+
+                <div style={styles.liveTrackInfo}>
+                  <div style={styles.liveTrackTitle}>
+                    {realTimeTrack.title}
+                  </div>
+                  <div style={styles.liveTrackArtist}>
+                    {realTimeTrack.artist}
+                  </div>
+                  <div style={styles.liveTrackDetails}>
+                    <span style={styles.liveTrackGenre}>{realTimeTrack.genre}</span>
+                    <span style={styles.liveTrackBitrate}>⚡ {realTimeTrack.bitrate}</span>
+                  </div>
+                </div>
+
+                <div style={styles.liveTrackMeta}>
+                  <div style={styles.metaItem}>
+                    <span style={styles.metaIcon}>🎵</span>
+                    <span style={styles.metaText}>Transmissão ao vivo 24/7</span>
+                  </div>
+                  <div style={styles.metaItem}>
+                    <span style={styles.metaIcon}>📡</span>
+                    <span style={styles.metaText}>Fonte: sapircast.caster.fm</span>
+                  </div>
+                  <div style={styles.metaItem}>
+                    <span style={styles.metaIcon}>🎧</span>
+                    <span style={styles.metaText}>Rádio George FC Tech</span>
+                  </div>
                 </div>
               </div>
-            </div>
-            
-            <div style={styles.audioInfoItem}>
-              <span style={styles.infoIcon}>📡</span>
-              <div style={styles.infoContent}>
-                <div style={styles.infoLabel}>STREAM</div>
-                <div style={styles.infoValue}>
-                  Caster.fm • {bitrate}
-                </div>
+            ) : (
+              <div style={styles.loadingCard}>
+                <div style={styles.loadingSpinner}></div>
+                <div style={styles.loadingText}>Conectando à transmissão ao vivo...</div>
               </div>
-            </div>
+            )}
           </div>
         </div>
 
-        {/* Live Stats */}
+        {/* Estatísticas */}
         <div style={styles.statsContainer}>
-          <h3 style={styles.statsTitle}>📈 ESTATÍSTICAS EM TEMPO REAL</h3>
+          <h3 style={styles.statsTitle}>📊 ESTATÍSTICAS DA TRANSMISSÃO</h3>
           <div style={styles.statsGrid}>
             <div style={styles.statCard}>
               <div style={styles.statCardIcon}>👥</div>
               <div style={styles.statCardContent}>
                 <div style={styles.statCardValue}>{listeners}</div>
-                <div style={styles.statCardLabel}>Ouvintes Conectados</div>
+                <div style={styles.statCardLabel}>Ouvintes Online</div>
                 <div style={styles.statCardProgress}>
                   <div style={{
                     ...styles.statCardProgressBar,
-                    width: `${Math.min(100, (listeners / 300) * 100)}%`,
+                    width: `${Math.min(100, (listeners / 500) * 100)}%`,
                     background: getListenerColor()
                   }}></div>
                 </div>
@@ -828,12 +739,12 @@ export default function App() {
               <div style={styles.statCardIcon}>📶</div>
               <div style={styles.statCardContent}>
                 <div style={styles.statCardValue}>{bitrate}</div>
-                <div style={styles.statCardLabel}>Qualidade do Stream</div>
+                <div style={styles.statCardLabel}>Qualidade</div>
                 <div style={styles.statCardProgress}>
                   <div style={{
                     ...styles.statCardProgressBar,
                     width: '100%',
-                    background: '#25D366'
+                    background: '#1DB954'
                   }}></div>
                 </div>
               </div>
@@ -843,7 +754,7 @@ export default function App() {
               <div style={styles.statCardIcon}>⏱️</div>
               <div style={styles.statCardContent}>
                 <div style={styles.statCardValue}>24/7</div>
-                <div style={styles.statCardLabel}>Transmissão Contínua</div>
+                <div style={styles.statCardLabel}>Transmissão</div>
                 <div style={styles.statCardProgress}>
                   <div style={{
                     ...styles.statCardProgressBar,
@@ -855,15 +766,15 @@ export default function App() {
             </div>
             
             <div style={styles.statCard}>
-              <div style={styles.statCardIcon}>🎛️</div>
+              <div style={styles.statCardIcon}>🔴</div>
               <div style={styles.statCardContent}>
-                <div style={styles.statCardValue}>{spectrumEffect}/10</div>
-                <div style={styles.statCardLabel}>Efeito de Spectrum</div>
+                <div style={styles.statCardValue}>AO VIVO</div>
+                <div style={styles.statCardLabel}>Status</div>
                 <div style={styles.statCardProgress}>
                   <div style={{
                     ...styles.statCardProgressBar,
-                    width: `${(spectrumEffect / 10) * 100}%`,
-                    background: spectrumEffects.find(e => e.id === spectrumEffect)?.color || '#6C2BDD'
+                    width: '100%',
+                    background: '#FF4757'
                   }}></div>
                 </div>
               </div>
@@ -871,88 +782,177 @@ export default function App() {
           </div>
         </div>
 
-        {/* Quick Actions */}
-        <div style={styles.actionsContainer}>
-          <button 
-            onClick={() => window.open(STREAM_URL, '_blank')}
-            style={styles.actionButton}
-          >
-            <span style={styles.actionIcon}>🔗</span>
-            <span style={styles.actionText}>ABRIR STREAM DIRETO</span>
-          </button>
-          
-          <button 
-            onClick={() => setVolume(100)}
-            style={styles.actionButton}
-          >
-            <span style={styles.actionIcon}>🔊</span>
-            <span style={styles.actionText}>VOLUME MÁXIMO</span>
-          </button>
-          
-          <button 
-            onClick={() => {
-              const randomEffect = Math.floor(Math.random() * 10) + 1;
-              setSpectrumEffect(randomEffect);
-            }}
-            style={styles.actionButton}
-          >
-            <span style={styles.actionIcon}>🎲</span>
-            <span style={styles.actionText}>EFEITO ALEATÓRIO</span>
-          </button>
-          
-          <a
-            href="https://wa.me/5511999999999"
-            target="_blank"
-            rel="noreferrer"
-            style={{...styles.actionButton, background: '#25D366'}}
-          >
-            <span style={styles.actionIcon}>📱</span>
-            <span style={styles.actionText}>PEDIR MÚSICA</span>
-          </a>
-        </div>
+        {/* Request Music Modal */}
+        {showRequestModal && (
+          <div style={styles.requestModal}>
+            <div style={styles.requestModalContent}>
+              <h2 style={styles.requestModalTitle}>🎵 PEDIR MÚSICA</h2>
+              <p style={styles.requestModalSubtitle}>
+                Preencha o formulário abaixo para solicitar uma música na Rádio George FC Tech
+              </p>
+
+              <form onSubmit={handleRequestSubmit} style={styles.requestForm}>
+                <div style={styles.formGroup}>
+                  <label style={styles.formLabel}>Seu Nome *</label>
+                  <input
+                    type="text"
+                    name="name"
+                    value={requestForm.name}
+                    onChange={handleRequestChange}
+                    style={styles.formInput}
+                    placeholder="Digite seu nome"
+                    required
+                  />
+                </div>
+
+                <div style={styles.formGroup}>
+                  <label style={styles.formLabel}>Nome da Música *</label>
+                  <input
+                    type="text"
+                    name="song"
+                    value={requestForm.song}
+                    onChange={handleRequestChange}
+                    style={styles.formInput}
+                    placeholder="Digite o nome da música"
+                    required
+                  />
+                </div>
+
+                <div style={styles.formGroup}>
+                  <label style={styles.formLabel}>Artista *</label>
+                  <input
+                    type="text"
+                    name="artist"
+                    value={requestForm.artist}
+                    onChange={handleRequestChange}
+                    style={styles.formInput}
+                    placeholder="Digite o nome do artista"
+                    required
+                  />
+                </div>
+
+                <div style={styles.formGroup}>
+                  <label style={styles.formLabel}>Mensagem (Opcional)</label>
+                  <textarea
+                    name="message"
+                    value={requestForm.message}
+                    onChange={handleRequestChange}
+                    style={styles.formTextarea}
+                    placeholder="Deixe uma mensagem especial ou dedicação"
+                    rows="3"
+                  />
+                </div>
+
+                <div style={styles.formActions}>
+                  <button
+                    type="button"
+                    onClick={() => setShowRequestModal(false)}
+                    style={styles.cancelButton}
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    type="submit"
+                    style={styles.submitButton}
+                  >
+                    Enviar Pedido
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
       </main>
 
       {/* Footer */}
       <footer style={styles.footer}>
-        <div style={styles.footerContent}>
-          <div style={styles.footerLogo}>
-            <span style={styles.footerIcon}>🎧</span>
-            <span style={styles.footerTitle}>Rádio George FC Tech</span>
-          </div>
-          
-          <div style={styles.footerInfo}>
-            <p style={styles.footerText}>
-              Transmitindo via Caster.fm • São Paulo, Brasil 🇧🇷
-            </p>
-            <div style={styles.footerStats}>
-              <span style={styles.footerStat}>
-                <span style={styles.footerStatIcon}>👥</span>
-                {listeners} ouvintes
-              </span>
-              <span style={styles.footerStat}>•</span>
-              <span style={styles.footerStat}>
-                <span style={styles.footerStatIcon}>🎵</span>
-                {bitrate}
-              </span>
-              <span style={styles.footerStat}>•</span>
-              <span style={styles.footerStat}>
-                <span style={styles.footerStatIcon}>⏱️</span>
-                {formatTime(currentTime)}
-              </span>
+        <div style={styles.footerContainer}>
+          <div style={styles.footerContent}>
+            <div style={styles.footerLogo}>
+              <span style={styles.footerLogoIcon}>🎧</span>
+              <span style={styles.footerLogoText}>Rádio George FC Tech</span>
             </div>
-          </div>
-          
-          <div style={styles.footerPlayer}>
-            <button 
-              onClick={togglePlay}
-              style={styles.footerPlayButton}
-            >
-              <span style={styles.footerPlayIcon}>
-                {isPlaying ? "⏸️" : "▶️"}
-              </span>
-            </button>
-            <div style={styles.footerStatus}>
-              {isPlaying ? "TOCANDO" : "PAUSADO"}
+            
+            <div style={styles.footerInfo}>
+              <div style={styles.footerStat}>
+                <span style={styles.footerStatIcon}>👥</span>
+                <span style={styles.footerStatValue}>{listeners}</span>
+                <span style={styles.footerStatLabel}>ouvintes</span>
+              </div>
+
+              <div style={styles.footerStat}>
+                <span style={styles.footerStatIcon}>
+                  {isPlaying ? "▶️" : "⏸️"}
+                </span>
+                <span style={styles.footerStatValue}>
+                  {isPlaying ? "AO VIVO" : "PAUSADO"}
+                </span>
+              </div>
+
+              <div style={styles.footerStat}>
+                <span style={styles.footerStatIcon}>🔴</span>
+                <span style={styles.footerStatValue}>
+                  TRANSMISSÃO
+                </span>
+              </div>
+            </div>
+
+            {/* Redes Sociais e Pedido de Música */}
+            <div style={styles.footerActions}>
+              <button
+                onClick={() => setShowRequestModal(true)}
+                style={styles.requestMusicButton}
+                title="Pedir Música"
+              >
+                <span style={styles.requestMusicIcon}>🎵</span>
+                <span style={styles.requestMusicText}>PEDIR MÚSICA</span>
+              </button>
+
+              <div style={styles.socialMedia}>
+                <button
+                  onClick={() => openSocialLink('facebook')}
+                  style={styles.socialButton}
+                  title="Facebook"
+                >
+                  <span style={styles.socialIcon}>📘</span>
+                </button>
+
+                <button
+                  onClick={() => openSocialLink('instagram')}
+                  style={styles.socialButton}
+                  title="Instagram"
+                >
+                  <span style={styles.socialIcon}>📷</span>
+                </button>
+
+                <button
+                  onClick={() => openSocialLink('twitter')}
+                  style={styles.socialButton}
+                  title="X (Twitter)"
+                >
+                  <span style={styles.socialIcon}>𝕏</span>
+                </button>
+
+                <button
+                  onClick={() => openSocialLink('youtube')}
+                  style={styles.socialButton}
+                  title="YouTube"
+                >
+                  <span style={styles.socialIcon}>📺</span>
+                </button>
+
+                <button
+                  onClick={() => openSocialLink('whatsapp')}
+                  style={styles.socialButton}
+                  title="WhatsApp"
+                >
+                  <span style={styles.socialIcon}>💬</span>
+                </button>
+              </div>
+            </div>
+            
+            <div style={styles.footerCopyright}>
+              © 2024 Rádio George FC Tech • Transmissão Ao Vivo 24/7 • WhatsApp: (15) 99248-5695
             </div>
           </div>
         </div>
@@ -966,30 +966,20 @@ export default function App() {
           100% { opacity: 1; transform: scale(1); }
         }
         
-        @keyframes glow {
-          0% { box-shadow: 0 0 10px #6C2BDD; }
-          50% { box-shadow: 0 0 25px #6C2BDD; }
-          100% { box-shadow: 0 0 10px #6C2BDD; }
-        }
-        
-        @keyframes spin {
-          0% { transform: rotate(0deg); }
-          100% { transform: rotate(360deg); }
-        }
-        
-        @keyframes float {
-          0%, 100% { transform: translateY(0); }
-          50% { transform: translateY(-10px); }
-        }
-        
         @keyframes fadeIn {
           from { opacity: 0; transform: translateY(20px); }
           to { opacity: 1; transform: translateY(0); }
         }
-        
-        @keyframes spectrumWave {
-          0% { transform: translateX(-100%); }
-          100% { transform: translateX(100%); }
+
+        @keyframes glow {
+          0% { box-shadow: 0 0 10px #1DB954; }
+          50% { box-shadow: 0 0 25px #1DB954; }
+          100% { box-shadow: 0 0 10px #1DB954; }
+        }
+
+        @keyframes spin {
+          0% { transform: rotate(0deg); }
+          100% { transform: rotate(360deg); }
         }
         
         * {
@@ -999,83 +989,123 @@ export default function App() {
         body {
           margin: 0;
           padding: 0;
-          background: #0a0a0a;
+          background: #000;
+          font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+          color: #fff;
         }
         
         button {
           cursor: pointer;
-          transition: all 0.3s ease;
+          transition: all 0.2s ease;
           border: none;
           font-family: inherit;
+          background: none;
         }
         
         button:hover:not(:disabled) {
-          transform: translateY(-2px);
-          filter: brightness(1.2);
-        }
-        
-        button:active:not(:disabled) {
-          transform: translateY(0);
-        }
-        
-        button:disabled {
-          opacity: 0.6;
-          cursor: not-allowed;
+          transform: scale(1.05);
         }
         
         input[type="range"] {
           cursor: pointer;
-          transition: all 0.3s ease;
-        }
-        
-        input[type="range"]:hover {
-          opacity: 1;
+          transition: all 0.2s ease;
         }
         
         input[type="range"]::-webkit-slider-thumb {
           -webkit-appearance: none;
-          width: 20px;
-          height: 20px;
+          width: 12px;
+          height: 12px;
           border-radius: 50%;
-          background: #6C2BDD;
+          background: #fff;
           cursor: pointer;
-          box-shadow: 0 0 15px rgba(108, 43, 221, 0.6);
-          transition: all 0.3s ease;
-        }
-        
-        input[type="range"]::-webkit-slider-thumb:hover {
-          transform: scale(1.2);
+          box-shadow: 0 0 10px rgba(0, 0, 0, 0.5);
         }
         
         input[type="range"]::-moz-range-thumb {
-          width: 20px;
-          height: 20px;
+          width: 12px;
+          height: 12px;
           border-radius: 50%;
-          background: #6C2BDD;
+          background: #fff;
           cursor: pointer;
-          box-shadow: 0 0 15px rgba(108, 43, 221, 0.6);
           border: none;
-          transition: all 0.3s ease;
-        }
-        
-        input[type="range"]::-moz-range-thumb:hover {
-          transform: scale(1.2);
-        }
-        
-        .pulse-animation {
-          animation: pulse 2s infinite;
-        }
-        
-        .glow-animation {
-          animation: glow 2s infinite;
-        }
-        
-        .float-animation {
-          animation: float 3s ease-in-out infinite;
+          box-shadow: 0 0 10px rgba(0, 0, 0, 0.5);
         }
         
         .fade-in {
-          animation: fadeIn 0.5s ease-out;
+          animation: fadeIn 0.3s ease-out;
+        }
+        
+        .glow {
+          animation: glow 2s infinite;
+        }
+        
+        /* Responsividade */
+        @media (max-width: 768px) {
+          .header-content {
+            flex-direction: column;
+            text-align: center;
+            gap: 15px;
+          }
+          
+          .stats-section {
+            justify-content: center;
+          }
+          
+          .player-container {
+            padding: 15px;
+          }
+          
+          .track-info-container {
+            flex-direction: column;
+            text-align: center;
+            gap: 20px;
+          }
+          
+          .controls-container {
+            flex-direction: column;
+            gap: 20px;
+          }
+          
+          .playback-controls {
+            order: 1;
+          }
+          
+          .volume-container {
+            order: 3;
+            width: 100%;
+          }
+          
+          .audio-indicators {
+            flex-direction: column;
+            gap: 15px;
+          }
+          
+          .stats-grid {
+            grid-template-columns: 1fr;
+          }
+        }
+        
+        @media (max-width: 480px) {
+          .title {
+            font-size: 20px;
+          }
+          
+          .stat-item {
+            min-width: 120px;
+          }
+          
+          .play-button {
+            width: 60px;
+            height: 60px;
+          }
+          
+          .track-title {
+            font-size: 18px;
+          }
+          
+          .track-artist {
+            font-size: 14px;
+          }
         }
       `}</style>
     </div>
@@ -1085,21 +1115,19 @@ export default function App() {
 const styles = {
   container: {
     minHeight: "100vh",
-    background: "linear-gradient(135deg, #0a0a0a 0%, #1a1a2e 50%, #0c0c1a 100%)",
+    background: "linear-gradient(180deg, #000 0%, #121212 100%)",
     color: "#ffffff",
-    fontFamily: "'Roboto', 'Segoe UI', system-ui, sans-serif",
+    fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif",
     overflowX: "hidden",
   },
 
   header: {
-    background: "rgba(15, 15, 25, 0.95)",
-    backdropFilter: "blur(15px)",
-    borderBottom: "2px solid rgba(108, 43, 221, 0.3)",
-    padding: "20px 0",
+    background: "#000",
+    borderBottom: "1px solid #282828",
+    padding: "16px 0",
     position: "sticky",
     top: 0,
     zIndex: 1000,
-    boxShadow: "0 5px 30px rgba(0, 0, 0, 0.5)",
   },
 
   headerContent: {
@@ -1121,16 +1149,13 @@ const styles = {
   logo: {
     display: "flex",
     alignItems: "center",
-    gap: "15px",
+    gap: "12px",
   },
 
   logoIcon: {
-    fontSize: "48px",
+    fontSize: "32px",
     animation: "pulse 3s infinite",
-    background: "linear-gradient(45deg, #6C2BDD, #9D4EDD, #C77DFF)",
-    WebkitBackgroundClip: "text",
-    WebkitTextFillColor: "transparent",
-    filter: "drop-shadow(0 0 10px rgba(108, 43, 221, 0.5))",
+    color: "#1DB954",
   },
 
   logoText: {
@@ -1139,50 +1164,40 @@ const styles = {
   },
 
   title: {
-    fontSize: "28px",
-    fontWeight: "800",
-    background: "linear-gradient(45deg, #6C2BDD, #9D4EDD, #C77DFF)",
-    WebkitBackgroundClip: "text",
-    WebkitTextFillColor: "transparent",
+    fontSize: "24px",
+    fontWeight: "700",
+    color: "#fff",
     margin: "0",
-    letterSpacing: "0.5px",
-    textShadow: "0 2px 10px rgba(108, 43, 221, 0.3)",
+    letterSpacing: "-0.5px",
   },
 
   subtitle: {
     fontSize: "14px",
-    opacity: "0.9",
-    margin: "5px 0 0 0",
-    letterSpacing: "1px",
+    color: "#b3b3b3",
+    margin: "4px 0 0 0",
     fontWeight: "500",
   },
 
   statsSection: {
     display: "flex",
-    gap: "20px",
+    gap: "16px",
     flexWrap: "wrap",
   },
 
   statItem: {
     display: "flex",
     alignItems: "center",
-    gap: "12px",
+    gap: "10px",
     background: "rgba(255, 255, 255, 0.05)",
-    padding: "12px 20px",
-    borderRadius: "15px",
+    padding: "10px 16px",
+    borderRadius: "8px",
     border: "1px solid rgba(255, 255, 255, 0.1)",
-    minWidth: "150px",
-    transition: "all 0.3s ease",
-  },
-
-  statItemHover: {
-    background: "rgba(255, 255, 255, 0.08)",
-    borderColor: "rgba(108, 43, 221, 0.3)",
-    transform: "translateY(-2px)",
+    minWidth: "140px",
+    transition: "all 0.2s ease",
   },
 
   statIcon: {
-    fontSize: "28px",
+    fontSize: "20px",
     opacity: "0.9",
   },
 
@@ -1192,16 +1207,16 @@ const styles = {
   },
 
   statLabel: {
-    fontSize: "12px",
-    opacity: "0.7",
+    fontSize: "11px",
+    color: "#b3b3b3",
     textTransform: "uppercase",
     letterSpacing: "1px",
     fontWeight: "600",
   },
 
   statValue: {
-    fontSize: "24px",
-    fontWeight: "800",
+    fontSize: "18px",
+    fontWeight: "700",
     marginTop: "2px",
   },
 
@@ -1209,256 +1224,298 @@ const styles = {
     maxWidth: "1200px",
     margin: "0 auto",
     padding: "30px 20px",
-    animation: "fadeIn 0.5s ease-out",
+    animation: "fadeIn 0.3s ease-out",
   },
 
-  spectrumContainer: {
-    position: "relative",
-    width: "100%",
-    height: "300px",
-    background: "rgba(0, 0, 0, 0.5)",
-    borderRadius: "20px",
+  playerContainer: {
+    background: "rgba(255, 255, 255, 0.03)",
+    borderRadius: "12px",
+    padding: "30px",
     marginBottom: "30px",
+    border: "1px solid rgba(255, 255, 255, 0.1)",
+  },
+
+  trackInfoContainer: {
+    display: "flex",
+    alignItems: "center",
+    gap: "20px",
+    marginBottom: "30px",
+    position: "relative",
+  },
+
+  albumArtPlaceholder: {
+    width: "120px",
+    height: "120px",
+    background: "linear-gradient(135deg, #1DB954, #191414)",
+    borderRadius: "8px",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    position: "relative",
     overflow: "hidden",
-    border: "2px solid rgba(108, 43, 221, 0.3)",
-    cursor: "pointer",
-    transition: "all 0.3s ease",
-    boxShadow: "0 15px 50px rgba(0, 0, 0, 0.7)",
+    flexShrink: 0,
   },
 
-  spectrumContainerHover: {
-    borderColor: "rgba(108, 43, 221, 0.6)",
-    transform: "scale(1.01)",
+  albumArtIcon: {
+    fontSize: "48px",
+    color: "#fff",
+    zIndex: 2,
   },
 
-  spectrumCanvas: {
-    width: "100%",
-    height: "100%",
-    display: "block",
-  },
-
-  spectrumOverlay: {
+  albumArtGlow: {
     position: "absolute",
     top: "0",
     left: "0",
     right: "0",
     bottom: "0",
-    display: "flex",
-    flexDirection: "column",
-    justifyContent: "center",
-    alignItems: "center",
-    background: "rgba(0, 0, 0, 0.4)",
-    pointerEvents: "none",
-    padding: "30px",
+    background: "radial-gradient(circle at center, rgba(29, 185, 84, 0.3) 0%, transparent 70%)",
+    animation: "glow 3s infinite",
   },
 
-  spectrumTitle: {
-    fontSize: "24px",
+  trackDetails: {
+    flex: 1,
+  },
+
+  trackTitle: {
+    fontSize: "32px",
     fontWeight: "800",
-    color: "#ffffff",
-    marginBottom: "15px",
-    textShadow: "0 2px 10px rgba(0, 0, 0, 0.8)",
-    background: "linear-gradient(45deg, #6C2BDD, #9D4EDD)",
-    WebkitBackgroundClip: "text",
-    WebkitTextFillColor: "transparent",
-    textAlign: "center",
+    color: "#fff",
+    marginBottom: "8px",
+    letterSpacing: "-0.5px",
   },
 
-  spectrumTrack: {
-    fontSize: "20px",
-    fontWeight: "600",
-    color: "#ffffff",
-    marginBottom: "15px",
-    textShadow: "0 2px 10px rgba(0, 0, 0, 0.8)",
-    textAlign: "center",
-    maxWidth: "80%",
-    overflow: "hidden",
-    textOverflow: "ellipsis",
-    whiteSpace: "nowrap",
+  trackArtist: {
+    fontSize: "18px",
+    color: "#b3b3b3",
+    marginBottom: "16px",
+    fontWeight: "500",
   },
 
-  spectrumStats: {
+  fileName: {
     display: "flex",
-    gap: "20px",
-    flexWrap: "wrap",
-    justifyContent: "center",
+    alignItems: "center",
+    gap: "8px",
+    marginBottom: "12px",
   },
 
-  spectrumStat: {
-    background: "rgba(255, 255, 255, 0.15)",
-    padding: "8px 16px",
-    borderRadius: "20px",
+  fileIcon: {
     fontSize: "14px",
+    color: "#1DB954",
+  },
+
+  fileNameText: {
+    fontSize: "14px",
+    color: "#b3b3b3",
+    fontFamily: "monospace",
+    background: "rgba(255, 255, 255, 0.05)",
+    padding: "4px 8px",
+    borderRadius: "4px",
+    border: "1px solid rgba(255, 255, 255, 0.1)",
+  },
+
+  trackMeta: {
+    display: "flex",
+    gap: "10px",
+    flexWrap: "wrap",
+  },
+
+  genreTag: {
+    background: "rgba(29, 185, 84, 0.2)",
+    color: "#1DB954",
+    padding: "6px 12px",
+    borderRadius: "20px",
+    fontSize: "12px",
     fontWeight: "600",
-    backdropFilter: "blur(10px)",
+    border: "1px solid rgba(29, 185, 84, 0.3)",
+  },
+
+  bitrateTag: {
+    background: "rgba(108, 43, 221, 0.2)",
+    color: "#9D4EDD",
+    padding: "6px 12px",
+    borderRadius: "20px",
+    fontSize: "12px",
+    fontWeight: "600",
+    border: "1px solid rgba(108, 43, 221, 0.3)",
+  },
+
+  liveTag: {
+    background: "rgba(255, 71, 87, 0.2)",
+    color: "#FF4757",
+    padding: "6px 12px",
+    borderRadius: "20px",
+    fontSize: "12px",
+    fontWeight: "600",
+    border: "1px solid rgba(255, 71, 87, 0.3)",
+  },
+
+  vuContainer: {
+    width: "100%",
+    height: "60px",
+    background: "rgba(0, 0, 0, 0.5)",
+    borderRadius: "8px",
+    marginBottom: "30px",
+    overflow: "hidden",
+    border: "1px solid rgba(255, 255, 255, 0.1)",
+  },
+
+  vuCanvas: {
+    width: "100%",
+    height: "100%",
+    display: "block",
   },
 
   controlsContainer: {
-    background: "rgba(255, 255, 255, 0.03)",
-    borderRadius: "20px",
-    padding: "30px",
-    marginBottom: "30px",
-    border: "1px solid rgba(255, 255, 255, 0.1)",
-    animation: "fadeIn 0.6s ease-out",
-  },
-
-  mainControls: {
     display: "flex",
     alignItems: "center",
-    gap: "20px",
+    gap: "30px",
     marginBottom: "30px",
     flexWrap: "wrap",
   },
 
+  playbackControls: {
+    display: "flex",
+    alignItems: "center",
+    gap: "20px",
+    flex: 1,
+    justifyContent: "center",
+  },
+
   playButton: {
-    flex: "1",
-    background: "linear-gradient(45deg, #6C2BDD, #9D4EDD)",
+    background: "#1DB954",
     border: "none",
-    borderRadius: "15px",
-    padding: "20px 30px",
-    fontSize: "18px",
-    fontWeight: "700",
-    color: "#ffffff",
+    borderRadius: "50%",
+    width: "70px",
+    height: "70px",
     display: "flex",
     alignItems: "center",
     justifyContent: "center",
-    gap: "15px",
-    minWidth: "250px",
-    boxShadow: "0 10px 30px rgba(108, 43, 221, 0.4)",
-    textTransform: "uppercase",
-    letterSpacing: "1px",
+    boxShadow: "0 8px 20px rgba(29, 185, 84, 0.3)",
   },
 
-  pauseButton: {
-    background: "linear-gradient(45deg, #FF4757, #FF6B81)",
+  playIcon: {
+    fontSize: "28px",
+    color: "#fff",
   },
 
-  buttonIcon: {
-    fontSize: "24px",
-  },
-
-  buttonText: {
-    fontSize: "16px",
-    fontWeight: "700",
-  },
-
-  volumeSection: {
-    flex: "2",
+  volumeContainer: {
     display: "flex",
     alignItems: "center",
-    gap: "15px",
+    gap: "12px",
+    flex: 1,
+    justifyContent: "flex-end",
+  },
+
+  volumeButton: {
     background: "rgba(255, 255, 255, 0.05)",
-    padding: "15px 25px",
-    borderRadius: "15px",
-    minWidth: "300px",
-  },
-
-  muteButton: {
-    background: "rgba(108, 43, 221, 0.2)",
-    border: "2px solid rgba(108, 43, 221, 0.3)",
-    borderRadius: "12px",
-    padding: "12px",
-    fontSize: "20px",
-    color: "#ffffff",
+    border: "1px solid rgba(255, 255, 255, 0.1)",
+    borderRadius: "50%",
+    width: "40px",
+    height: "40px",
     display: "flex",
     alignItems: "center",
     justifyContent: "center",
-    width: "50px",
-    height: "50px",
+    color: "#b3b3b3",
+  },
+
+  volumeIcon: {
+    fontSize: "18px",
+  },
+
+  volumeSliderContainer: {
+    flex: 1,
+    maxWidth: "150px",
+    position: "relative",
+    height: "20px",
   },
 
   volumeSlider: {
-    flex: "1",
-    height: "8px",
-    background: "linear-gradient(to right, #6C2BDD, #9D4EDD)",
-    borderRadius: "4px",
-    WebkitAppearance: "none",
+    width: "100%",
+    height: "4px",
+    position: "absolute",
+    opacity: 0,
+    zIndex: 2,
+    cursor: "pointer",
+  },
+
+  volumeBarBackground: {
+    width: "100%",
+    height: "4px",
+    background: "rgba(255, 255, 255, 0.1)",
+    borderRadius: "2px",
+    overflow: "hidden",
+  },
+
+  volumeBarFill: {
+    height: "100%",
+    background: "#1DB954",
+    borderRadius: "2px",
+    transition: "width 0.2s ease",
   },
 
   volumeValue: {
-    fontSize: "16px",
-    fontWeight: "700",
-    color: "#6C2BDD",
-    minWidth: "50px",
-    textAlign: "center",
-  },
-
-  settingsButton: {
-    background: "rgba(255, 255, 255, 0.05)",
-    border: "2px solid rgba(108, 43, 221, 0.3)",
-    borderRadius: "15px",
-    padding: "20px 30px",
-    fontSize: "16px",
-    fontWeight: "700",
-    color: "#ffffff",
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: "10px",
-    minWidth: "150px",
-  },
-
-  effectsPanel: {
-    background: "rgba(0, 0, 0, 0.5)",
-    borderRadius: "15px",
-    padding: "25px",
-    marginBottom: "20px",
-    border: "1px solid rgba(108, 43, 221, 0.3)",
-    animation: "fadeIn 0.3s ease-out",
-  },
-
-  effectsTitle: {
-    fontSize: "18px",
-    fontWeight: "700",
-    color: "#9D4EDD",
-    marginBottom: "20px",
-    textAlign: "center",
-  },
-
-  effectsGrid: {
-    display: "grid",
-    gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))",
-    gap: "15px",
-  },
-
-  effectButton: {
-    background: "rgba(255, 255, 255, 0.05)",
-    border: "2px solid",
-    borderRadius: "12px",
-    padding: "15px",
-    display: "flex",
-    flexDirection: "column",
-    alignItems: "center",
-    gap: "10px",
-    transition: "all 0.3s ease",
-  },
-
-  effectButtonActive: {
-    background: "rgba(108, 43, 221, 0.2)",
-    transform: "scale(1.05)",
-    boxShadow: "0 5px 20px rgba(108, 43, 221, 0.3)",
-  },
-
-  effectPreview: {
-    width: "40px",
-    height: "40px",
-    borderRadius: "50%",
-    marginBottom: "5px",
-  },
-
-  effectName: {
     fontSize: "14px",
+    color: "#b3b3b3",
+    minWidth: "40px",
+    fontWeight: "500",
+  },
+
+  audioIndicators: {
+    display: "flex",
+    gap: "20px",
+    flexWrap: "wrap",
+  },
+
+  indicator: {
+    flex: 1,
+    minWidth: "200px",
+    background: "rgba(255, 255, 255, 0.03)",
+    padding: "15px",
+    borderRadius: "8px",
+    border: "1px solid rgba(255, 255, 255, 0.05)",
+  },
+
+  indicatorLabel: {
+    fontSize: "12px",
     fontWeight: "600",
-    color: "#ffffff",
-    textAlign: "center",
+    marginBottom: "10px",
+    display: "flex",
+    alignItems: "center",
+    gap: "8px",
+    color: "#b3b3b3",
+  },
+
+  indicatorIcon: {
+    fontSize: "12px",
+  },
+
+  indicatorBar: {
+    height: "6px",
+    background: "rgba(255, 255, 255, 0.1)",
+    borderRadius: "3px",
+    overflow: "hidden",
+    marginBottom: "8px",
+  },
+
+  indicatorFill: {
+    height: "100%",
+    borderRadius: "3px",
+    transition: "width 0.3s ease",
+  },
+
+  indicatorValue: {
+    fontSize: "14px",
+    fontWeight: "700",
+    textAlign: "right",
+    color: "#1DB954",
   },
 
   errorMessage: {
     background: "rgba(255, 71, 87, 0.1)",
     border: "1px solid rgba(255, 71, 87, 0.3)",
-    borderRadius: "12px",
+    borderRadius: "8px",
     padding: "15px 20px",
-    marginBottom: "20px",
+    marginTop: "20px",
     display: "flex",
     alignItems: "center",
     gap: "15px",
@@ -1466,12 +1523,12 @@ const styles = {
   },
 
   errorIcon: {
-    fontSize: "24px",
+    fontSize: "20px",
   },
 
   errorText: {
-    flex: "1",
-    fontSize: "15px",
+    flex: 1,
+    fontSize: "14px",
     fontWeight: "600",
     color: "#FF6B6B",
   },
@@ -1479,370 +1536,472 @@ const styles = {
   retryButton: {
     background: "rgba(255, 71, 87, 0.3)",
     border: "1px solid rgba(255, 71, 87, 0.5)",
-    borderRadius: "8px",
+    borderRadius: "6px",
     padding: "8px 16px",
-    fontSize: "14px",
+    fontSize: "13px",
     fontWeight: "600",
-    color: "#ffffff",
+    color: "#fff",
   },
 
-  audioInfo: {
-    display: "grid",
-    gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))",
-    gap: "20px",
-    marginTop: "30px",
+  playlistContainer: {
+    marginBottom: "30px",
   },
 
-  audioInfoItem: {
+  playlistTitle: {
+    fontSize: "18px",
+    fontWeight: "700",
+    color: "#fff",
+    marginBottom: "20px",
     display: "flex",
     alignItems: "center",
-    gap: "15px",
+    gap: "10px",
+  },
+
+  liveTrackContainer: {
+    marginTop: "10px",
+  },
+
+  liveTrackCard: {
     background: "rgba(255, 255, 255, 0.03)",
+    borderRadius: "12px",
     padding: "20px",
-    borderRadius: "15px",
     border: "1px solid rgba(255, 255, 255, 0.05)",
   },
 
-  infoIcon: {
-    fontSize: "32px",
-    opacity: "0.8",
+  liveTrackHeader: {
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: "15px",
   },
 
-  infoContent: {
-    flex: "1",
+  liveIndicator: {
+    display: "flex",
+    alignItems: "center",
+    gap: "8px",
   },
 
-  infoLabel: {
+  liveDot: {
+    width: "8px",
+    height: "8px",
+    background: "#FF4757",
+    borderRadius: "50%",
+    animation: "pulse 1s infinite",
+  },
+
+  liveText: {
     fontSize: "12px",
-    opacity: "0.7",
-    textTransform: "uppercase",
-    letterSpacing: "1px",
-    marginBottom: "5px",
     fontWeight: "600",
+    color: "#FF4757",
   },
 
-  infoValue: {
-    fontSize: "16px",
+  lastUpdate: {
+    fontSize: "12px",
+    color: "#b3b3b3",
+  },
+
+  liveTrackInfo: {
+    marginBottom: "15px",
+  },
+
+  liveTrackTitle: {
+    fontSize: "20px",
     fontWeight: "700",
-    color: "#ffffff",
+    color: "#fff",
+    marginBottom: "8px",
+  },
+
+  liveTrackArtist: {
+    fontSize: "16px",
+    color: "#b3b3b3",
+    marginBottom: "12px",
+  },
+
+  liveTrackDetails: {
+    display: "flex",
+    gap: "10px",
+    flexWrap: "wrap",
+  },
+
+  liveTrackGenre: {
+    background: "rgba(29, 185, 84, 0.2)",
+    color: "#1DB954",
+    padding: "4px 10px",
+    borderRadius: "15px",
+    fontSize: "11px",
+    fontWeight: "600",
+    border: "1px solid rgba(29, 185, 84, 0.3)",
+  },
+
+  liveTrackBitrate: {
+    background: "rgba(108, 43, 221, 0.2)",
+    color: "#9D4EDD",
+    padding: "4px 10px",
+    borderRadius: "15px",
+    fontSize: "11px",
+    fontWeight: "600",
+    border: "1px solid rgba(108, 43, 221, 0.3)",
+  },
+
+  liveTrackMeta: {
+    display: "flex",
+    flexDirection: "column",
+    gap: "8px",
+  },
+
+  metaItem: {
+    display: "flex",
+    alignItems: "center",
+    gap: "8px",
+  },
+
+  metaIcon: {
+    fontSize: "14px",
+    color: "#1DB954",
+  },
+
+  metaText: {
+    fontSize: "12px",
+    color: "#b3b3b3",
+  },
+
+  loadingCard: {
+    background: "rgba(255, 255, 255, 0.03)",
+    borderRadius: "12px",
+    padding: "40px 20px",
+    border: "1px solid rgba(255, 255, 255, 0.05)",
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+    gap: "15px",
+  },
+
+  loadingSpinner: {
+    width: "40px",
+    height: "40px",
+    border: "3px solid rgba(255, 255, 255, 0.1)",
+    borderTop: "3px solid #1DB954",
+    borderRadius: "50%",
+    animation: "spin 1s linear infinite",
+  },
+
+  loadingText: {
+    fontSize: "14px",
+    color: "#b3b3b3",
+    textAlign: "center",
   },
 
   statsContainer: {
     marginBottom: "30px",
-    animation: "fadeIn 0.7s ease-out",
   },
 
   statsTitle: {
-    fontSize: "20px",
-    fontWeight: "800",
-    marginBottom: "25px",
-    background: "linear-gradient(45deg, #6C2BDD, #9D4EDD)",
-    WebkitBackgroundClip: "text",
-    WebkitTextFillColor: "transparent",
-    textAlign: "center",
-    letterSpacing: "1px",
+    fontSize: "18px",
+    fontWeight: "700",
+    color: "#fff",
+    marginBottom: "20px",
   },
 
   statsGrid: {
     display: "grid",
     gridTemplateColumns: "repeat(auto-fit, minmax(250px, 1fr))",
-    gap: "20px",
+    gap: "15px",
   },
 
   statCard: {
     background: "rgba(255, 255, 255, 0.03)",
-    borderRadius: "15px",
-    padding: "25px",
+    borderRadius: "12px",
+    padding: "20px",
     border: "1px solid rgba(255, 255, 255, 0.05)",
     display: "flex",
     alignItems: "center",
-    gap: "20px",
-    transition: "all 0.3s ease",
-  },
-
-  statCardHover: {
-    background: "rgba(255, 255, 255, 0.05)",
-    borderColor: "rgba(108, 43, 221, 0.3)",
-    transform: "translateY(-5px)",
+    gap: "15px",
   },
 
   statCardIcon: {
-    fontSize: "40px",
-    background: "linear-gradient(45deg, #6C2BDD, #9D4EDD)",
+    fontSize: "32px",
+    background: "linear-gradient(45deg, #1DB954, #25D366)",
     WebkitBackgroundClip: "text",
     WebkitTextFillColor: "transparent",
   },
 
   statCardContent: {
-    flex: "1",
+    flex: 1,
   },
 
   statCardValue: {
-    fontSize: "32px",
+    fontSize: "28px",
     fontWeight: "800",
-    color: "#6C2BDD",
-    marginBottom: "5px",
+    color: "#1DB954",
+    marginBottom: "4px",
   },
 
   statCardLabel: {
     fontSize: "14px",
-    opacity: "0.8",
-    marginBottom: "10px",
-    fontWeight: "600",
+    color: "#b3b3b3",
+    marginBottom: "8px",
+    fontWeight: "500",
   },
 
   statCardProgress: {
-    height: "6px",
+    height: "4px",
     background: "rgba(255, 255, 255, 0.1)",
-    borderRadius: "3px",
+    borderRadius: "2px",
     overflow: "hidden",
   },
 
   statCardProgressBar: {
     height: "100%",
-    borderRadius: "3px",
+    borderRadius: "2px",
     transition: "width 0.5s ease",
   },
 
-  actionsContainer: {
-    display: "flex",
-    gap: "15px",
-    flexWrap: "wrap",
-    marginBottom: "30px",
-    animation: "fadeIn 0.8s ease-out",
-  },
-
-  actionButton: {
-    flex: "1",
-    background: "linear-gradient(45deg, #6C2BDD, #9D4EDD)",
-    border: "none",
-    borderRadius: "12px",
-    padding: "18px 25px",
-    fontSize: "15px",
-    fontWeight: "700",
-    color: "#ffffff",
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: "12px",
-    minWidth: "200px",
-    textDecoration: "none",
-    textTransform: "uppercase",
-    letterSpacing: "0.5px",
-  },
-
-  actionIcon: {
-    fontSize: "20px",
-  },
-
-  actionText: {
-    fontSize: "14px",
-    fontWeight: "700",
-  },
-
   footer: {
-    background: "rgba(15, 15, 25, 0.95)",
-    borderTop: "2px solid rgba(108, 43, 221, 0.3)",
-    padding: "25px 0",
-    backdropFilter: "blur(10px)",
-    animation: "fadeIn 0.9s ease-out",
+    background: "#000",
+    borderTop: "1px solid #282828",
+    padding: "30px 0",
+    marginTop: "50px",
   },
 
-  footerContent: {
+  footerContainer: {
     maxWidth: "1200px",
     margin: "0 auto",
     padding: "0 20px",
+  },
+
+  footerContent: {
     display: "flex",
+    flexDirection: "column",
     alignItems: "center",
-    justifyContent: "space-between",
-    flexWrap: "wrap",
     gap: "20px",
+    textAlign: "center",
   },
 
   footerLogo: {
     display: "flex",
     alignItems: "center",
-    gap: "12px",
-  },
-
-  footerIcon: {
-    fontSize: "28px",
-    background: "linear-gradient(45deg, #6C2BDD, #9D4EDD)",
-    WebkitBackgroundClip: "text",
-    WebkitTextFillColor: "transparent",
-  },
-
-  footerTitle: {
-    fontSize: "18px",
-    fontWeight: "700",
-    background: "linear-gradient(45deg, #6C2BDD, #9D4EDD)",
-    WebkitBackgroundClip: "text",
-    WebkitTextFillColor: "transparent",
-  },
-
-  footerInfo: {
-    flex: "1",
-    textAlign: "center",
-  },
-
-  footerText: {
-    fontSize: "14px",
-    opacity: "0.8",
+    gap: "10px",
     marginBottom: "10px",
   },
 
-  footerStats: {
+  footerLogoIcon: {
+    fontSize: "24px",
+    color: "#1DB954",
+  },
+
+  footerLogoText: {
+    fontSize: "18px",
+    fontWeight: "700",
+    color: "#fff",
+  },
+
+  footerInfo: {
     display: "flex",
-    gap: "15px",
-    justifyContent: "center",
+    gap: "30px",
     flexWrap: "wrap",
+    justifyContent: "center",
   },
 
   footerStat: {
     display: "flex",
     alignItems: "center",
-    gap: "5px",
-    fontSize: "14px",
-    opacity: "0.7",
+    gap: "8px",
   },
 
   footerStatIcon: {
+    fontSize: "16px",
+    color: "#1DB954",
+  },
+
+  footerStatValue: {
     fontSize: "14px",
+    fontWeight: "600",
+    color: "#fff",
   },
 
-  footerPlayer: {
-    display: "flex",
-    alignItems: "center",
-    gap: "15px",
+  footerStatLabel: {
+    fontSize: "12px",
+    color: "#b3b3b3",
   },
 
-  footerPlayButton: {
-    background: "rgba(108, 43, 221, 0.2)",
-    border: "2px solid rgba(108, 43, 221, 0.3)",
-    borderRadius: "50%",
-    width: "50px",
-    height: "50px",
-    fontSize: "20px",
-    color: "#ffffff",
+  footerCopyright: {
+    fontSize: "14px",
+    color: "#b3b3b3",
+    marginTop: "10px",
+  },
+
+  footerActions: {
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+    gap: "20px",
+    marginTop: "20px",
+  },
+
+  requestMusicButton: {
+    background: "linear-gradient(45deg, #1DB954, #25D366)",
+    border: "none",
+    borderRadius: "25px",
+    padding: "12px 24px",
     display: "flex",
     alignItems: "center",
+    gap: "10px",
+    cursor: "pointer",
+    fontSize: "14px",
+    fontWeight: "600",
+    color: "#fff",
+    boxShadow: "0 4px 15px rgba(29, 185, 84, 0.3)",
+    transition: "all 0.2s ease",
+  },
+
+  requestMusicIcon: {
+    fontSize: "18px",
+  },
+
+  requestMusicText: {
+    fontSize: "14px",
+    fontWeight: "600",
+  },
+
+  socialMedia: {
+    display: "flex",
+    gap: "10px",
+    flexWrap: "wrap",
     justifyContent: "center",
   },
 
-  footerPlayIcon: {
+  socialButton: {
+    background: "rgba(255, 255, 255, 0.05)",
+    border: "1px solid rgba(255, 255, 255, 0.1)",
+    borderRadius: "50%",
+    width: "45px",
+    height: "45px",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    cursor: "pointer",
+    transition: "all 0.2s ease",
+  },
+
+  socialIcon: {
     fontSize: "20px",
   },
 
-  footerStatus: {
+  requestModal: {
+    position: "fixed",
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    background: "rgba(0, 0, 0, 0.8)",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    zIndex: 2000,
+    padding: "20px",
+    animation: "fadeIn 0.3s ease-out",
+  },
+
+  requestModalContent: {
+    background: "#181818",
+    borderRadius: "12px",
+    padding: "30px",
+    maxWidth: "500px",
+    width: "100%",
+    maxHeight: "80vh",
+    overflowY: "auto",
+    border: "1px solid rgba(255, 255, 255, 0.1)",
+  },
+
+  requestModalTitle: {
+    fontSize: "24px",
+    fontWeight: "700",
+    color: "#fff",
+    marginBottom: "10px",
+    textAlign: "center",
+  },
+
+  requestModalSubtitle: {
+    fontSize: "14px",
+    color: "#b3b3b3",
+    marginBottom: "25px",
+    textAlign: "center",
+    lineHeight: "1.5",
+  },
+
+  requestForm: {
+    display: "flex",
+    flexDirection: "column",
+    gap: "20px",
+  },
+
+  formGroup: {
+    display: "flex",
+    flexDirection: "column",
+    gap: "8px",
+  },
+
+  formLabel: {
     fontSize: "14px",
     fontWeight: "600",
-    opacity: "0.8",
+    color: "#fff",
   },
 
-  // Responsividade
-  '@media (max-width: 768px)': {
-    headerContent: {
-      flexDirection: "column",
-      textAlign: "center",
-    },
-    
-    statItem: {
-      minWidth: "120px",
-      flex: "1",
-    },
-    
-    spectrumContainer: {
-      height: "200px",
-    },
-    
-    mainControls: {
-      flexDirection: "column",
-    },
-    
-    playButton: {
-      width: "100%",
-      minWidth: "auto",
-    },
-    
-    volumeSection: {
-      width: "100%",
-      minWidth: "auto",
-    },
-    
-    settingsButton: {
-      width: "100%",
-      minWidth: "auto",
-    },
-    
-    effectsGrid: {
-      gridTemplateColumns: "repeat(2, 1fr)",
-    },
-    
-    audioInfo: {
-      gridTemplateColumns: "1fr",
-    },
-    
-    statsGrid: {
-      gridTemplateColumns: "1fr",
-    },
-    
-    actionsContainer: {
-      flexDirection: "column",
-    },
-    
-    actionButton: {
-      width: "100%",
-      minWidth: "auto",
-    },
-    
-    footerContent: {
-      flexDirection: "column",
-      textAlign: "center",
-    },
+  formInput: {
+    padding: "12px 16px",
+    borderRadius: "8px",
+    border: "1px solid rgba(255, 255, 255, 0.1)",
+    background: "rgba(255, 255, 255, 0.05)",
+    color: "#fff",
+    fontSize: "14px",
+    fontFamily: "inherit",
+    outline: "none",
+    transition: "all 0.2s ease",
   },
 
-  '@media (max-width: 480px)': {
-    title: {
-      fontSize: "22px",
-    },
-    
-    spectrumContainer: {
-      height: "150px",
-    },
-    
-    effectsGrid: {
-      gridTemplateColumns: "1fr",
-    },
+  formTextarea: {
+    padding: "12px 16px",
+    borderRadius: "8px",
+    border: "1px solid rgba(255, 255, 255, 0.1)",
+    background: "rgba(255, 255, 255, 0.05)",
+    color: "#fff",
+    fontSize: "14px",
+    fontFamily: "inherit",
+    outline: "none",
+    resize: "vertical",
+    minHeight: "80px",
+    transition: "all 0.2s ease",
+  },
+
+  formActions: {
+    display: "flex",
+    gap: "12px",
+    marginTop: "10px",
+  },
+
+  cancelButton: {
+    flex: 1,
+    background: "rgba(255, 255, 255, 0.05)",
+    border: "1px solid rgba(255, 255, 255, 0.1)",
+    borderRadius: "8px",
+    padding: "12px 24px",
+    fontSize: "14px",
+    fontWeight: "600",
+    color: "#fff",
+    cursor: "pointer",
+    transition: "all 0.2s ease",
+  },
+
+  submitButton: {
+    flex: 1,
+    background: "#1DB954",
+    border: "none",
+    borderRadius: "8px",
+    padding: "12px 24px",
+    fontSize: "14px",
+    fontWeight: "600",
+    color: "#fff",
+    cursor: "pointer",
+    transition: "all 0.2s ease",
   },
 };
-
-// Adicionar hover effects
-const addHoverEffects = () => {
-  const style = document.createElement('style');
-  style.textContent = `
-    .stat-item:hover {
-      background: rgba(255, 255, 255, 0.08) !important;
-      border-color: rgba(108, 43, 221, 0.3) !important;
-      transform: translateY(-2px) !important;
-    }
-    
-    .spectrum-container:hover {
-      border-color: rgba(108, 43, 221, 0.6) !important;
-      transform: scale(1.01) !important;
-    }
-    
-    .stat-card:hover {
-      background: rgba(255, 255, 255, 0.05) !important;
-      border-color: rgba(108, 43, 221, 0.3) !important;
-      transform: translateY(-5px) !important;
-    }
-    
-    .effect-button:hover {
-      transform: translateY(-2px) !important;
-      box-shadow: 0 5px 15px rgba(0, 0, 0, 0.3) !important;
-    }
-  `;
-  document.head.appendChild(style);
-};
-
-export { addHoverEffects };
