@@ -4,25 +4,26 @@ export default function App() {
       <h1 style={styles.title}>📻 Rádio George FC Tech</h1>
       <p style={styles.live}>🔴 AO VIVO</p>
 
-      <iframe
-        src="https://radiogeorgefctech.ismyradio.com/player"
-        width="100%"
-        height="120"
-        frameBorder="0"
-        scrolling="no"
-        allow="autoplay"
-        style={styles.player}
-      />
+      <div style={styles.playerWrapper}>
+        <iframe
+          src="https://radiogeorgefctech.ismyradio.com"
+          title="Rádio George FC Tech"
+          allow="autoplay"
+          frameBorder="0"
+          scrolling="no"
+          style={styles.iframe}
+        />
+      </div>
 
       <p style={styles.text}>
         Música, tecnologia e informação 24 horas no ar.
       </p>
 
       <a
-        href="https://wa.me/5515992485695"
+        href="https://wa.me/5500000000000"
         target="_blank"
-        style={styles.button}
         rel="noreferrer"
+        style={styles.button}
       >
         📲 WhatsApp da Rádio
       </a>
@@ -49,8 +50,23 @@ const styles = {
   },
   title: { fontSize: "28px", fontWeight: "bold" },
   live: { color: "red", fontWeight: "bold" },
-  player: { maxWidth: "360px" },
-  text: { opacity: 0.8 },
+
+  playerWrapper: {
+    width: "100%",
+    maxWidth: "380px",
+    height: "180px",
+    borderRadius: "12px",
+    overflow: "hidden",
+    boxShadow: "0 0 20px rgba(0,0,0,0.6)",
+  },
+
+  iframe: {
+    width: "100%",
+    height: "100%",
+    border: "none",
+  },
+
+  text: { opacity: 0.85 },
   button: {
     background: "#1db954",
     color: "#000",
