@@ -1,10 +1,27 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 
 export default function App() {
-  const [isPlaying, setIsPlaying] = useState(true);
+  const [isPlaying, setIsPlaying] = useState(false);
   const [volume, setVolume] = useState(80);
   const [currentTime, setCurrentTime] = useState(new Date());
   const [listenerCount, setListenerCount] = useState(Math.floor(Math.random() * 500) + 100);
+  const [muted, setMuted] = useState(false);
+  const [currentTrack, setCurrentTrack] = useState("Carregando...");
+  const [bitrate, setBitrate] = useState("96kbps");
+  const [spectrumData, setSpectrumData] = useState([]);
+  const [audioContext, setAudioContext] = useState(null);
+  const [analyser, setAnalyser] = useState(null);
+  const [source, setSource] = useState(null);
+  const [isLoading, setIsLoading] = useState(false);
+
+  const audioRef = useRef(null);
+  const canvasRef = useRef(null);
+  const animationFrameRef = useRef(null);
+  const audioContextRef = useRef(null);
+  const analyserRef = useRef(null);
+
+  // Stream URL direta do Caster.fm
+  const STREAM_URL = "https://sapircast.caster.fm:19793/UYD7q";
 
   // Atualizar hora atual
   useEffect(() => {
@@ -28,25 +45,212 @@ export default function App() {
     return () => clearInterval(interval);
   }, []);
 
-  const formatTime = (date) => {
-    return date.toLocaleTimeString('pt-BR', { 
-      hour: '2-digit', 
-      minute: '2-digit' 
-    });
+  // Inicializar Web Audio API para spectrum
+  useEffect(() => {
+    if (isPlaying && audioRef.current) {
+      initAudioAnalysis();
+    }
+    
+    return () => {
+      if (animationFrameRef.current) {
+        cancelAnimationFrame(animationFrameRef.current);
+      }
+      if (audioContextRef.current) {
+        audioContextRef.current.close();
+      }
+    };
+  }, [isPlaying]);
+
+  const initAudioAnalysis = () => {
+    try {
+      const AudioContext = window.AudioContext || window.webkitAudioContext;
+      const context = new AudioContext();
+      audioContextRef.current = context;
+      
+      const analyser = context.createAnalyser();
+      analyser.fftSize = 256;
+      analyserRef.current = analyser;
+      
+      const source = context.createMediaElementSource(audioRef.current);
+      source.connect(analyser);
+      analyser.connect(context.destination);
+      
+      startSpectrumAnimation();
+    } catch (error) {
+      console.error('Erro ao inicializar análise de áudio:', error);
+      startFakeSpectrum();
+    }
   };
 
-  const togglePlay = () => {
-    setIsPlaying(!isPlaying);
-    // Aqui você pode adicionar lógica para controlar o iframe
-    const iframe = document.querySelector('iframe');
-    if (iframe) {
-      iframe.contentWindow.postMessage(isPlaying ? 'pause' : 'play', '*');
+  const startSpectrumAnimation = () => {
+    if (!canvasRef.current || !analyserRef.current) {
+      startFakeSpectrum();
+      return;
+    }
+
+    const canvas = canvasRef.current;
+    const ctx = canvas.getContext('2d');
+    const analyser = analyserRef.current;
+    const bufferLength = analyser.frequencyBinCount;
+    const dataArray = new Uint8Array(bufferLength);
+
+    const draw = () => {
+      animationFrameRef.current = requestAnimationFrame(draw);
+      
+      analyser.getByteFrequencyData(dataArray);
+      
+      // Limpar canvas
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      
+      // Configurar estilo
+      const gradient = ctx.createLinearGradient(0, 0, canvas.width, 0);
+      gradient.addColorStop(0, '#6C2BDD');
+      gradient.addColorStop(0.5, '#9D4EDD');
+      gradient.addColorStop(1, '#C77DFF');
+      ctx.fillStyle = gradient;
+      
+      // Desenhar barras do spectrum
+      const barWidth = (canvas.width / bufferLength) * 2.5;
+      let barHeight;
+      let x = 0;
+      
+      for (let i = 0; i < bufferLength; i++) {
+        barHeight = dataArray[i] / 2;
+        
+        // Desenhar barra principal
+        ctx.fillRect(x, canvas.height - barHeight, barWidth, barHeight);
+        
+        // Adicionar brilho no topo
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.3)';
+        ctx.fillRect(x, canvas.height - barHeight, barWidth, 2);
+        ctx.fillStyle = gradient;
+        
+        x += barWidth + 1;
+      }
+      
+      // Atualizar dados para exibição
+      setSpectrumData(Array.from(dataArray));
+    };
+    
+    draw();
+  };
+
+  const startFakeSpectrum = () => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    
+    const ctx = canvas.getContext('2d');
+    const bufferLength = 64;
+    const fakeData = new Array(bufferLength).fill(0);
+    
+    const draw = () => {
+      animationFrameRef.current = requestAnimationFrame(draw);
+      
+      // Gerar dados aleatórios para simulação
+      for (let i = 0; i < bufferLength; i++) {
+        fakeData[i] = Math.sin(Date.now() / 1000 + i * 0.1) * 50 + 50 + Math.random() * 20;
+      }
+      
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      
+      const gradient = ctx.createLinearGradient(0, 0, canvas.width, 0);
+      gradient.addColorStop(0, '#6C2BDD');
+      gradient.addColorStop(0.5, '#9D4EDD');
+      gradient.addColorStop(1, '#C77DFF');
+      ctx.fillStyle = gradient;
+      
+      const barWidth = (canvas.width / bufferLength) * 2.5;
+      let x = 0;
+      
+      for (let i = 0; i < bufferLength; i++) {
+        const barHeight = fakeData[i];
+        ctx.fillRect(x, canvas.height - barHeight, barWidth, barHeight);
+        
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.3)';
+        ctx.fillRect(x, canvas.height - barHeight, barWidth, 2);
+        ctx.fillStyle = gradient;
+        
+        x += barWidth + 1;
+      }
+      
+      setSpectrumData(fakeData);
+    };
+    
+    draw();
+  };
+
+  // Controle do player
+  const togglePlay = async () => {
+    setIsLoading(true);
+    
+    if (!isPlaying) {
+      try {
+        if (!audioRef.current.src) {
+          audioRef.current.src = STREAM_URL;
+        }
+        
+        await audioRef.current.play();
+        setIsPlaying(true);
+        setCurrentTrack("Transmissão ao vivo - Rádio George FC Tech");
+        
+        // Simular mudança de música a cada 3 minutos
+        const tracks = [
+          "Música eletrônica - DJ Mix",
+          "Pop hits internacionais",
+          "Tecnologia & Inovação Podcast",
+          "Música brasileira atual",
+          "Clássicos do rock"
+        ];
+        
+        setInterval(() => {
+          const randomTrack = tracks[Math.floor(Math.random() * tracks.length)];
+          setCurrentTrack(`${randomTrack} - Ao vivo`);
+        }, 180000);
+        
+      } catch (error) {
+        console.error('Erro ao reproduzir:', error);
+        alert('Erro ao conectar com a rádio. Tente novamente.');
+        setIsPlaying(false);
+      }
+    } else {
+      audioRef.current.pause();
+      setIsPlaying(false);
+      
+      if (animationFrameRef.current) {
+        cancelAnimationFrame(animationFrameRef.current);
+      }
+    }
+    
+    setIsLoading(false);
+  };
+
+  const toggleMute = () => {
+    if (audioRef.current) {
+      audioRef.current.muted = !muted;
+      setMuted(!muted);
     }
   };
 
   const handleVolumeChange = (e) => {
     const newVolume = parseInt(e.target.value);
     setVolume(newVolume);
+    if (audioRef.current) {
+      audioRef.current.volume = newVolume / 100;
+      if (newVolume === 0) {
+        setMuted(true);
+        audioRef.current.muted = true;
+      } else if (muted) {
+        setMuted(false);
+        audioRef.current.muted = false;
+      }
+    }
+  };
+
+  const formatTime = (date) => {
+    return date.toLocaleTimeString('pt-BR', { 
+      hour: '2-digit', 
+      minute: '2-digit' 
+    });
   };
 
   const programacao = [
@@ -58,117 +262,207 @@ export default function App() {
   ];
 
   const socialLinks = [
-    { name: "Instagram", icon: "📷", url: "#" },
-    { name: "Facebook", icon: "👥", url: "#" },
-    { name: "Twitter", icon: "🐦", url: "#" },
-    { name: "YouTube", icon: "▶️", url: "#" },
+    { name: "Instagram", icon: "📷", url: "https://instagram.com" },
+    { name: "Facebook", icon: "👥", url: "https://facebook.com" },
+    { name: "Twitter", icon: "🐦", url: "https://twitter.com" },
+    { name: "YouTube", icon: "▶️", url: "https://youtube.com" },
   ];
 
   return (
     <div style={styles.container}>
+      {/* Áudio oculto para stream direta */}
+      <audio
+        ref={audioRef}
+        crossOrigin="anonymous"
+        style={{ display: 'none' }}
+        preload="none"
+      />
+
       {/* Header */}
       <header style={styles.header}>
         <div style={styles.headerContent}>
           <div style={styles.logoContainer}>
-            <div style={styles.logo}>📻</div>
+            <div style={styles.logoIcon}>📻</div>
             <div>
               <h1 style={styles.title}>Rádio George FC Tech</h1>
-              <p style={styles.subtitle}>Música • Tecnologia • Informação</p>
+              <p style={styles.subtitle}>Música • Tecnologia • Informação • 24/7</p>
             </div>
           </div>
-          <div style={styles.timeDisplay}>
-            <div style={styles.currentTime}>{formatTime(currentTime)}</div>
-            <div style={styles.date}>
-              {currentTime.toLocaleDateString('pt-BR', { 
-                weekday: 'long', 
-                day: 'numeric', 
-                month: 'long' 
-              })}
+          <div style={styles.statsContainer}>
+            <div style={styles.statBox}>
+              <div style={styles.statValue}>{listenerCount}</div>
+              <div style={styles.statLabel}>Ouvintes Online</div>
+            </div>
+            <div style={styles.statBox}>
+              <div style={styles.statValue}>{bitrate}</div>
+              <div style={styles.statLabel}>Qualidade</div>
+            </div>
+            <div style={styles.statBox}>
+              <div style={styles.statValue}>{formatTime(currentTime)}</div>
+              <div style={styles.statLabel}>Hora Local</div>
             </div>
           </div>
         </div>
       </header>
 
       <main style={styles.main}>
-        {/* Live Status */}
-        <div style={styles.liveSection}>
+        {/* Live Badge */}
+        <div style={styles.liveContainer}>
           <div style={styles.liveBadge}>
             <span style={styles.liveDot}></span>
-            <span style={styles.liveText}>TRANSMITINDO AO VIVO</span>
+            <span style={styles.liveText}>TRANSMISSÃO AO VIVO</span>
           </div>
-          
-          <div style={styles.stats}>
-            <div style={styles.statItem}>
-              <span style={styles.statIcon}>👥</span>
-              <span style={styles.statText}>{listenerCount} ouvintes online</span>
-            </div>
-            <div style={styles.statItem}>
-              <span style={styles.statIcon}>🎵</span>
-              <span style={styles.statText}>MP3 128kbps</span>
-            </div>
+          <div style={styles.streamInfo}>
+            <span style={styles.streamIcon}>📡</span>
+            <span style={styles.streamText}>Caster.fm Streaming</span>
           </div>
         </div>
 
-        {/* Player */}
-        <div style={styles.playerSection}>
-          <div style={styles.playerWrapper}>
-            {/* Player Oficial isMyRadio */}
-            <div style={styles.iframeContainer}>
-              <iframe
-                src="https://radiogeorgefctech.ismyradio.com/player?embed=1"
-                title="Rádio George FC Tech Player"
-                allow="autoplay"
-                frameBorder="0"
-                scrolling="no"
-                style={styles.playerIframe}
-                onLoad={() => console.log('Player carregado!')}
-              />
-            </div>
-
-            {/* Controles Extras */}
-            <div style={styles.controls}>
-              <button 
-                onClick={togglePlay} 
-                style={styles.controlButton}
-                aria-label={isPlaying ? "Pausar" : "Tocar"}
-              >
-                {isPlaying ? "⏸️" : "▶️"}
-              </button>
-              
-              <div style={styles.volumeControl}>
-                <span style={styles.volumeIcon}>🔊</span>
-                <input
-                  type="range"
-                  min="0"
-                  max="100"
-                  value={volume}
-                  onChange={handleVolumeChange}
-                  style={styles.volumeSlider}
-                  aria-label="Volume"
-                />
-                <span style={styles.volumeValue}>{volume}%</span>
+        {/* Player Principal */}
+        <div style={styles.playerContainer}>
+          {/* Spectrum Visualizer */}
+          <div style={styles.spectrumContainer}>
+            <canvas
+              ref={canvasRef}
+              width={800}
+              height={150}
+              style={styles.spectrumCanvas}
+            />
+            <div style={styles.spectrumOverlay}>
+              <div style={styles.spectrumTitle}>ANALISADOR DE ÁUDIO</div>
+              <div style={styles.spectrumStatus}>
+                {isPlaying ? 'ANÁLISE ATIVA' : 'PAUSADO'}
               </div>
             </div>
           </div>
 
-          {/* Player para Mobile */}
-          <div style={styles.mobilePlayer}>
-            <audio
-              controls
-              autoPlay
-              style={styles.mobileAudio}
-            >
-              <source 
-                src="https://stream.ismyradio.com/radiogeorgefctech" 
-                type="audio/mpeg" 
-              />
-            </audio>
+          {/* Informações da Música */}
+          <div style={styles.trackInfo}>
+            <div style={styles.nowPlaying}>
+              <div style={styles.nowPlayingLabel}>TOCANDO AGORA</div>
+              <div style={styles.trackTitle}>{currentTrack}</div>
+              <div style={styles.trackDetails}>
+                <span style={styles.detailItem}>🎵 {bitrate} MP3</span>
+                <span style={styles.detailItem}>📡 sapircast.caster.fm</span>
+                <span style={styles.detailItem}>🌐 São Paulo, BR</span>
+              </div>
+            </div>
+            
+            {/* Controles do Player */}
+            <div style={styles.playerControls}>
+              <div style={styles.controlButtons}>
+                <button 
+                  onClick={togglePlay} 
+                  disabled={isLoading}
+                  style={{
+                    ...styles.playButton,
+                    ...(isPlaying ? styles.pauseButton : {}),
+                    ...(isLoading ? styles.loadingButton : {})
+                  }}
+                  aria-label={isPlaying ? "Pausar" : "Tocar"}
+                >
+                  {isLoading ? (
+                    <div style={styles.spinner}></div>
+                  ) : isPlaying ? (
+                    <>
+                      <span style={styles.buttonIcon}>⏸️</span>
+                      <span style={styles.buttonText}>PAUSAR</span>
+                    </>
+                  ) : (
+                    <>
+                      <span style={styles.buttonIcon}>▶️</span>
+                      <span style={styles.buttonText}>OUVIR AGORA</span>
+                    </>
+                  )}
+                </button>
+                
+                <div style={styles.secondaryControls}>
+                  <button 
+                    onClick={toggleMute} 
+                    style={{
+                      ...styles.muteButton,
+                      ...(muted ? styles.mutedButton : {})
+                    }}
+                    aria-label={muted ? "Ativar som" : "Mutar"}
+                  >
+                    <span style={styles.buttonIcon}>
+                      {muted ? "🔇" : volume > 50 ? "🔊" : "🔈"}
+                    </span>
+                  </button>
+                  
+                  <button 
+                    onClick={() => {
+                      const newVolume = Math.min(100, volume + 10);
+                      setVolume(newVolume);
+                      if (audioRef.current) audioRef.current.volume = newVolume / 100;
+                    }}
+                    style={styles.volumeUpButton}
+                    aria-label="Aumentar volume"
+                  >
+                    <span style={styles.buttonIcon}>➕</span>
+                  </button>
+                  
+                  <button 
+                    onClick={() => {
+                      const newVolume = Math.max(0, volume - 10);
+                      setVolume(newVolume);
+                      if (audioRef.current) audioRef.current.volume = newVolume / 100;
+                    }}
+                    style={styles.volumeDownButton}
+                    aria-label="Diminuir volume"
+                  >
+                    <span style={styles.buttonIcon}>➖</span>
+                  </button>
+                </div>
+              </div>
+              
+              {/* Controle de Volume */}
+              <div style={styles.volumeContainer}>
+                <div style={styles.volumeLabel}>
+                  <span style={styles.volumeIcon}>
+                    {muted ? "🔇" : volume > 50 ? "🔊" : "🔈"}
+                  </span>
+                  <span style={styles.volumeText}>{muted ? "MUDO" : `${volume}%`}</span>
+                </div>
+                <input
+                  type="range"
+                  min="0"
+                  max="100"
+                  value={muted ? 0 : volume}
+                  onChange={handleVolumeChange}
+                  style={styles.volumeSlider}
+                  aria-label="Volume"
+                />
+              </div>
+              
+              {/* Status do Player */}
+              <div style={styles.statusContainer}>
+                <div style={styles.statusItem}>
+                  <span style={styles.statusIcon}>
+                    {isPlaying ? "🎵" : "⏸️"}
+                  </span>
+                  <span style={styles.statusText}>
+                    {isPlaying ? "TRANSMISSÃO ATIVA" : "PAUSADO"}
+                  </span>
+                </div>
+                <div style={styles.statusItem}>
+                  <span style={styles.statusIcon}>📊</span>
+                  <span style={styles.statusText}>
+                    {spectrumData.length > 0 ? "SPECTRUM ATIVO" : "ANALISADOR"}
+                  </span>
+                </div>
+                <div style={styles.statusItem}>
+                  <span style={styles.statusIcon}>⚡</span>
+                  <span style={styles.statusText}>STREAM DIRETA</span>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
 
         {/* Programação */}
         <div style={styles.scheduleSection}>
-          <h2 style={styles.sectionTitle}>📅 Programação do Dia</h2>
+          <h2 style={styles.sectionTitle}>📅 PROGRAMAÇÃO DO DIA</h2>
           <div style={styles.scheduleGrid}>
             {programacao.map((item, index) => (
               <div key={index} style={styles.scheduleItem}>
@@ -178,7 +472,10 @@ export default function App() {
                   <div style={styles.programDJ}>com {item.dj}</div>
                 </div>
                 {formatTime(currentTime).includes(item.hora.substring(0, 2)) && (
-                  <div style={styles.nowPlaying}>AGORA</div>
+                  <div style={styles.nowPlayingBadge}>
+                    <span style={styles.nowPlayingDot}></span>
+                    AO VIVO
+                  </div>
                 )}
               </div>
             ))}
@@ -187,28 +484,122 @@ export default function App() {
 
         {/* Botões de Ação */}
         <div style={styles.actionButtons}>
+          <button 
+            onClick={togglePlay}
+            style={styles.actionButton}
+          >
+            <span style={styles.actionIcon}>{isPlaying ? "⏸️" : "▶️"}</span>
+            <span style={styles.actionText}>
+              {isPlaying ? "PAUSAR RÁDIO" : "OUVIR RÁDIO"}
+            </span>
+          </button>
+          
           <a
             href="https://wa.me/5511999999999"
             target="_blank"
             rel="noreferrer"
             style={styles.whatsappButton}
           >
-            <span style={styles.buttonIcon}>📱</span>
-            <span>Pedir Música no WhatsApp</span>
+            <span style={styles.actionIcon}>📱</span>
+            <span style={styles.actionText}>PEDIR MÚSICA</span>
           </a>
           
-          <a
-            href="mailto:contato@radio.com"
-            style={styles.emailButton}
+          <button 
+            onClick={() => {
+              const audio = document.createElement('audio');
+              audio.src = STREAM_URL;
+              audio.play();
+              window.open(STREAM_URL, '_blank');
+            }}
+            style={styles.streamButton}
           >
-            <span style={styles.buttonIcon}>✉️</span>
-            <span>Enviar Sugestão</span>
-          </a>
+            <span style={styles.actionIcon}>🔗</span>
+            <span style={styles.actionText}>STREAM DIRETO</span>
+          </button>
+        </div>
+
+        {/* Informações Técnicas */}
+        <div style={styles.infoGrid}>
+          <div style={styles.infoCard}>
+            <div style={styles.infoHeader}>
+              <span style={styles.infoIcon}>🎧</span>
+              <h3 style={styles.infoTitle}>COMO OUVIR</h3>
+            </div>
+            <div style={styles.infoList}>
+              <div style={styles.infoItem}>
+                <span style={styles.checkIcon}>✅</span>
+                <span>Stream MP3 96kbps</span>
+              </div>
+              <div style={styles.infoItem}>
+                <span style={styles.checkIcon}>✅</span>
+                <span>Servidor: Caster.fm</span>
+              </div>
+              <div style={styles.infoItem}>
+                <span style={styles.checkIcon}>✅</span>
+                <span>24 horas no ar</span>
+              </div>
+              <div style={styles.infoItem}>
+                <span style={styles.checkIcon}>✅</span>
+                <span>Todos dispositivos</span>
+              </div>
+            </div>
+          </div>
+          
+          <div style={styles.infoCard}>
+            <div style={styles.infoHeader}>
+              <span style={styles.infoIcon}>📡</span>
+              <h3 style={styles.infoTitle}>CONEXÃO</h3>
+            </div>
+            <div style={styles.connectionInfo}>
+              <div style={styles.connectionItem}>
+                <span style={styles.connectionLabel}>Status:</span>
+                <span style={styles.connectionValue}>
+                  {isPlaying ? 
+                    <span style={styles.connected}>CONECTADO</span> : 
+                    <span style={styles.disconnected}>DESCONECTADO</span>
+                  }
+                </span>
+              </div>
+              <div style={styles.connectionItem}>
+                <span style={styles.connectionLabel}>Servidor:</span>
+                <span style={styles.connectionValue}>sapircast.caster.fm</span>
+              </div>
+              <div style={styles.connectionItem}>
+                <span style={styles.connectionLabel}>Porta:</span>
+                <span style={styles.connectionValue}>19793</span>
+              </div>
+              <div style={styles.connectionItem}>
+                <span style={styles.connectionLabel}>Mount:</span>
+                <span style={styles.connectionValue}>/UYD7q</span>
+              </div>
+            </div>
+          </div>
+          
+          <div style={styles.infoCard}>
+            <div style={styles.infoHeader}>
+              <span style={styles.infoIcon}>🤝</span>
+              <h3 style={styles.infoTitle}>CONTATO</h3>
+            </div>
+            <div style={styles.contactInfo}>
+              <div style={styles.contactItem}>
+                <span style={styles.contactIcon}>📧</span>
+                <span>contato@radiogeorgefctech.com</span>
+              </div>
+              <div style={styles.contactItem}>
+                <span style={styles.contactIcon}>📞</span>
+                <span>(11) 99999-9999</span>
+              </div>
+              <div style={styles.contactItem}>
+                <span style={styles.contactIcon}>💼</span>
+                <span>Parcerias comerciais</span>
+              </div>
+            </div>
+          </div>
         </div>
 
         {/* Redes Sociais */}
         <div style={styles.socialSection}>
-          <h3 style={styles.sectionTitle}>Siga a Rádio</h3>
+          <h3 style={styles.sectionTitle}>📱 SIGA A RÁDIO</h3>
           <div style={styles.socialGrid}>
             {socialLinks.map((social, index) => (
               <a
@@ -219,32 +610,9 @@ export default function App() {
                 style={styles.socialLink}
               >
                 <span style={styles.socialIcon}>{social.icon}</span>
-                <span>{social.name}</span>
+                <span style={styles.socialName}>{social.name}</span>
               </a>
             ))}
-          </div>
-        </div>
-
-        {/* Informações Técnicas */}
-        <div style={styles.infoSection}>
-          <div style={styles.infoCard}>
-            <h4 style={styles.infoTitle}>📡 Como Ouvir</h4>
-            <p style={styles.infoText}>
-              • Acesse nosso site 24h/dia<br/>
-              • Use nosso app (em breve)<br/>
-              • Stream direto: 128kbps MP3<br/>
-              • Compatível com todos os dispositivos
-            </p>
-          </div>
-          
-          <div style={styles.infoCard}>
-            <h4 style={styles.infoTitle}>🎙️ Seja Nosso Parceiro</h4>
-            <p style={styles.infoText}>
-              Quer anunciar na rádio?<br/>
-              Entre em contato:<br/>
-              comercial@radiogeorgefctech.com<br/>
-              (11) 99999-9999
-            </p>
           </div>
         </div>
       </main>
@@ -252,41 +620,146 @@ export default function App() {
       {/* Footer */}
       <footer style={styles.footer}>
         <div style={styles.footerContent}>
-          <p style={styles.footerText}>
-            © 2026 Rádio George FC Tech. Todos os direitos reservados.<br/>
-            Transmitindo de São Paulo para todo o Brasil 🇧🇷
-          </p>
-          <div style={styles.techBadge}>
-            <span>Powered by ismyradio • React • Web Stream</span>
+          <div style={styles.footerLogo}>
+            <span style={styles.footerIcon}>📻</span>
+            <span style={styles.footerTitle}>Rádio George FC Tech</span>
+          </div>
+          <div style={styles.footerInfo}>
+            <p style={styles.footerText}>
+              © 2026 Rádio George FC Tech. Transmitindo de São Paulo para todo o Brasil 🇧🇷
+            </p>
+            <div style={styles.techInfo}>
+              <span style={styles.techItem}>Powered by Caster.fm</span>
+              <span style={styles.techItem}>●</span>
+              <span style={styles.techItem}>Web Audio API</span>
+              <span style={styles.techItem}>●</span>
+              <span style={styles.techItem}>Spectrum Visualizer</span>
+            </div>
+          </div>
+          <div style={styles.playerStats}>
+            <div style={styles.statItemFooter}>
+              <span style={styles.statValueFooter}>{listenerCount}</span>
+              <span style={styles.statLabelFooter}>Ouvintes</span>
+            </div>
+            <div style={styles.statItemFooter}>
+              <span style={styles.statValueFooter}>{bitrate}</span>
+              <span style={styles.statLabelFooter}>Qualidade</span>
+            </div>
+            <div style={styles.statItemFooter}>
+              <span style={styles.statValueFooter}>
+                {isPlaying ? "ON" : "OFF"}
+              </span>
+              <span style={styles.statLabelFooter}>Status</span>
+            </div>
           </div>
         </div>
       </footer>
 
-      {/* Animação CSS */}
+      {/* CSS Animations */}
       <style>{`
         @keyframes pulse {
           0% { opacity: 1; transform: scale(1); }
-          50% { opacity: 0.5; transform: scale(1.1); }
+          50% { opacity: 0.5; transform: scale(1.05); }
           100% { opacity: 1; transform: scale(1); }
         }
         
-        @keyframes slideIn {
-          from { transform: translateY(-10px); opacity: 0; }
-          to { transform: translateY(0); opacity: 1; }
+        @keyframes glow {
+          0% { box-shadow: 0 0 5px #6C2BDD, 0 0 10px rgba(108, 43, 221, 0.3); }
+          50% { box-shadow: 0 0 20px #6C2BDD, 0 0 30px rgba(108, 43, 221, 0.5); }
+          100% { box-shadow: 0 0 5px #6C2BDD, 0 0 10px rgba(108, 43, 221, 0.3); }
         }
         
-        @keyframes glow {
-          0% { box-shadow: 0 0 5px #1db954; }
-          50% { box-shadow: 0 0 20px #1db954; }
-          100% { box-shadow: 0 0 5px #1db954; }
+        @keyframes slideUp {
+          from { opacity: 0; transform: translateY(20px); }
+          to { opacity: 1; transform: translateY(0); }
+        }
+        
+        @keyframes spectrumBar {
+          0% { transform: scaleY(0.1); }
+          50% { transform: scaleY(1); }
+          100% { transform: scaleY(0.1); }
+        }
+        
+        @keyframes spin {
+          0% { transform: rotate(0deg); }
+          100% { transform: rotate(360deg); }
+        }
+        
+        @keyframes fadeIn {
+          from { opacity: 0; }
+          to { opacity: 1; }
+        }
+        
+        @keyframes float {
+          0%, 100% { transform: translateY(0); }
+          50% { transform: translateY(-10px); }
         }
         
         * {
           box-sizing: border-box;
         }
         
-        iframe {
-          animation: slideIn 0.5s ease-out;
+        body {
+          margin: 0;
+          padding: 0;
+          overflow-x: hidden;
+        }
+        
+        button {
+          cursor: pointer;
+          transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+        
+        button:hover:not(:disabled) {
+          transform: translateY(-2px);
+        }
+        
+        button:active:not(:disabled) {
+          transform: translateY(0);
+        }
+        
+        input[type="range"] {
+          cursor: pointer;
+        }
+        
+        input[type="range"]::-webkit-slider-thumb {
+          -webkit-appearance: none;
+          width: 20px;
+          height: 20px;
+          border-radius: 50%;
+          background: #6C2BDD;
+          cursor: pointer;
+          box-shadow: 0 0 10px rgba(108, 43, 221, 0.5);
+        }
+        
+        input[type="range"]::-moz-range-thumb {
+          width: 20px;
+          height: 20px;
+          border-radius: 50%;
+          background: #6C2BDD;
+          cursor: pointer;
+          box-shadow: 0 0 10px rgba(108, 43, 221, 0.5);
+          border: none;
+        }
+        
+        .pulse {
+          animation: pulse 2s infinite;
+        }
+        
+        .glow {
+          animation: glow 2s infinite;
+        }
+        
+        .slide-up {
+          animation: slideUp 0.5s ease-out;
+        }
+        
+        .fade-in {
+          animation: fadeIn 0.3s ease-out;
+        }
+        
+        .float {
+          animation: float 3s ease-in-out infinite;
         }
       `}</style>
     </div>
@@ -296,16 +769,21 @@ export default function App() {
 const styles = {
   container: {
     minHeight: "100vh",
-    background: "linear-gradient(135deg, #0a0a0a 0%, #1a2b3c 100%)",
+    background: "linear-gradient(135deg, #0a0a0a 0%, #1a1a2e 50%, #16213e 100%)",
     color: "#ffffff",
-    fontFamily: "'Segoe UI', 'Roboto', 'Arial', sans-serif",
+    fontFamily: "'Roboto', 'Segoe UI', 'Arial', sans-serif",
+    overflowX: "hidden",
   },
 
   header: {
-    background: "rgba(0, 0, 0, 0.7)",
+    background: "rgba(10, 10, 20, 0.95)",
     backdropFilter: "blur(10px)",
-    borderBottom: "1px solid rgba(255, 255, 255, 0.1)",
+    borderBottom: "2px solid rgba(108, 43, 221, 0.3)",
     padding: "20px 0",
+    position: "sticky",
+    top: 0,
+    zIndex: 1000,
+    animation: "slideUp 0.5s ease-out",
   },
 
   headerContent: {
@@ -315,6 +793,8 @@ const styles = {
     justifyContent: "space-between",
     alignItems: "center",
     padding: "0 20px",
+    flexWrap: "wrap",
+    gap: "20px",
   },
 
   logoContainer: {
@@ -323,40 +803,59 @@ const styles = {
     gap: "15px",
   },
 
-  logo: {
+  logoIcon: {
     fontSize: "48px",
-    animation: "pulse 2s infinite",
+    animation: "pulse 3s infinite",
+    background: "linear-gradient(45deg, #6C2BDD, #9D4EDD)",
+    WebkitBackgroundClip: "text",
+    WebkitTextFillColor: "transparent",
   },
 
   title: {
     fontSize: "28px",
-    fontWeight: "700",
-    background: "linear-gradient(45deg, #1db954, #25d366)",
+    fontWeight: "800",
+    background: "linear-gradient(45deg, #6C2BDD, #9D4EDD, #C77DFF)",
     WebkitBackgroundClip: "text",
     WebkitTextFillColor: "transparent",
     margin: "0",
+    letterSpacing: "1px",
   },
 
   subtitle: {
     fontSize: "14px",
     opacity: "0.8",
     margin: "5px 0 0 0",
+    letterSpacing: "0.5px",
   },
 
-  timeDisplay: {
-    textAlign: "right",
+  statsContainer: {
+    display: "flex",
+    gap: "20px",
+    flexWrap: "wrap",
   },
 
-  currentTime: {
-    fontSize: "32px",
-    fontWeight: "600",
-    color: "#1db954",
+  statBox: {
+    background: "rgba(108, 43, 221, 0.1)",
+    border: "1px solid rgba(108, 43, 221, 0.2)",
+    borderRadius: "12px",
+    padding: "12px 20px",
+    textAlign: "center",
+    minWidth: "120px",
+    animation: "fadeIn 0.6s ease-out",
   },
 
-  date: {
-    fontSize: "14px",
+  statValue: {
+    fontSize: "24px",
+    fontWeight: "700",
+    color: "#6C2BDD",
+    marginBottom: "5px",
+  },
+
+  statLabel: {
+    fontSize: "12px",
     opacity: "0.8",
-    marginTop: "5px",
+    textTransform: "uppercase",
+    letterSpacing: "1px",
   },
 
   main: {
@@ -365,166 +864,373 @@ const styles = {
     padding: "30px 20px",
   },
 
-  liveSection: {
+  liveContainer: {
     display: "flex",
     justifyContent: "space-between",
     alignItems: "center",
     marginBottom: "30px",
-    background: "rgba(255, 0, 0, 0.1)",
-    padding: "15px 25px",
-    borderRadius: "15px",
-    border: "1px solid rgba(255, 0, 0, 0.3)",
+    flexWrap: "wrap",
+    gap: "15px",
+    animation: "slideUp 0.6s ease-out",
   },
 
   liveBadge: {
     display: "flex",
     alignItems: "center",
-    gap: "10px",
+    gap: "12px",
+    background: "rgba(108, 43, 221, 0.15)",
+    padding: "12px 24px",
+    borderRadius: "50px",
+    border: "2px solid rgba(108, 43, 221, 0.3)",
+    animation: "glow 2s infinite",
   },
 
   liveDot: {
     width: "12px",
     height: "12px",
     borderRadius: "50%",
-    backgroundColor: "#ff0000",
+    background: "linear-gradient(45deg, #ff0000, #ff6b6b)",
     animation: "pulse 1s infinite",
   },
 
   liveText: {
-    color: "#ff0000",
+    color: "#ff6b6b",
     fontWeight: "700",
-    fontSize: "16px",
-    letterSpacing: "1px",
+    fontSize: "14px",
+    letterSpacing: "2px",
+    textTransform: "uppercase",
   },
 
-  stats: {
-    display: "flex",
-    gap: "20px",
-  },
-
-  statItem: {
+  streamInfo: {
     display: "flex",
     alignItems: "center",
-    gap: "8px",
+    gap: "10px",
+    background: "rgba(255, 255, 255, 0.05)",
+    padding: "10px 20px",
+    borderRadius: "50px",
   },
 
-  statIcon: {
+  streamIcon: {
     fontSize: "18px",
+    animation: "float 3s ease-in-out infinite",
   },
 
-  statText: {
+  streamText: {
     fontSize: "14px",
+    fontWeight: "600",
     opacity: "0.9",
   },
 
-  playerSection: {
-    marginBottom: "40px",
-  },
-
-  playerWrapper: {
-    background: "rgba(255, 255, 255, 0.05)",
+  playerContainer: {
+    background: "rgba(15, 15, 25, 0.8)",
     borderRadius: "20px",
-    padding: "25px",
-    marginBottom: "20px",
-    border: "1px solid rgba(255, 255, 255, 0.1)",
-  },
-
-  iframeContainer: {
-    borderRadius: "15px",
+    padding: "30px",
+    marginBottom: "40px",
+    border: "1px solid rgba(108, 43, 221, 0.2)",
+    boxShadow: "0 20px 60px rgba(0, 0, 0, 0.5)",
+    animation: "slideUp 0.7s ease-out",
+    position: "relative",
     overflow: "hidden",
-    marginBottom: "20px",
   },
 
-  playerIframe: {
+  spectrumContainer: {
+    position: "relative",
     width: "100%",
-    height: "140px",
+    height: "180px",
+    background: "rgba(0, 0, 0, 0.3)",
+    borderRadius: "15px",
+    marginBottom: "30px",
+    overflow: "hidden",
+    border: "1px solid rgba(108, 43, 221, 0.3)",
+  },
+
+  spectrumCanvas: {
+    width: "100%",
+    height: "100%",
+    display: "block",
+  },
+
+  spectrumOverlay: {
+    position: "absolute",
+    top: "0",
+    left: "0",
+    right: "0",
+    bottom: "0",
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+    justifyContent: "center",
+    background: "rgba(0, 0, 0, 0.4)",
+    pointerEvents: "none",
+  },
+
+  spectrumTitle: {
+    fontSize: "16px",
+    fontWeight: "700",
+    letterSpacing: "3px",
+    textTransform: "uppercase",
+    color: "rgba(255, 255, 255, 0.6)",
+    marginBottom: "10px",
+  },
+
+  spectrumStatus: {
+    fontSize: "24px",
+    fontWeight: "800",
+    background: "linear-gradient(45deg, #6C2BDD, #9D4EDD)",
+    WebkitBackgroundClip: "text",
+    WebkitTextFillColor: "transparent",
+    letterSpacing: "2px",
+  },
+
+  trackInfo: {
+    animation: "fadeIn 0.8s ease-out",
+  },
+
+  nowPlaying: {
+    marginBottom: "30px",
+  },
+
+  nowPlayingLabel: {
+    fontSize: "12px",
+    fontWeight: "700",
+    letterSpacing: "2px",
+    textTransform: "uppercase",
+    color: "#9D4EDD",
+    marginBottom: "10px",
+  },
+
+  trackTitle: {
+    fontSize: "24px",
+    fontWeight: "700",
+    marginBottom: "15px",
+    background: "linear-gradient(45deg, #ffffff, #cccccc)",
+    WebkitBackgroundClip: "text",
+    WebkitTextFillColor: "transparent",
+  },
+
+  trackDetails: {
+    display: "flex",
+    gap: "20px",
+    flexWrap: "wrap",
+  },
+
+  detailItem: {
+    display: "flex",
+    alignItems: "center",
+    gap: "8px",
+    background: "rgba(255, 255, 255, 0.05)",
+    padding: "8px 16px",
+    borderRadius: "20px",
+    fontSize: "14px",
+  },
+
+  playerControls: {
+    animation: "slideUp 0.9s ease-out",
+  },
+
+  controlButtons: {
+    display: "flex",
+    alignItems: "center",
+    gap: "20px",
+    marginBottom: "30px",
+    flexWrap: "wrap",
+  },
+
+  playButton: {
+    background: "linear-gradient(45deg, #6C2BDD, #9D4EDD)",
     border: "none",
     borderRadius: "15px",
-  },
-
-  controls: {
+    padding: "20px 40px",
+    fontSize: "16px",
+    fontWeight: "700",
+    letterSpacing: "1px",
     display: "flex",
-    justifyContent: "space-between",
     alignItems: "center",
-    marginTop: "15px",
+    gap: "15px",
+    color: "white",
+    boxShadow: "0 10px 30px rgba(108, 43, 221, 0.4)",
+    minWidth: "220px",
+    justifyContent: "center",
+    textTransform: "uppercase",
   },
 
-  controlButton: {
-    background: "#1db954",
-    border: "none",
+  pauseButton: {
+    background: "linear-gradient(45deg, #ff4757, #ff6b81)",
+  },
+
+  loadingButton: {
+    opacity: "0.7",
+    cursor: "not-allowed",
+  },
+
+  spinner: {
+    width: "24px",
+    height: "24px",
+    border: "3px solid rgba(255, 255, 255, 0.3)",
+    borderTop: "3px solid #ffffff",
     borderRadius: "50%",
-    width: "50px",
-    height: "50px",
+    animation: "spin 1s linear infinite",
+  },
+
+  buttonIcon: {
     fontSize: "24px",
-    cursor: "pointer",
-    transition: "all 0.3s",
+  },
+
+  buttonText: {
+    fontSize: "16px",
+    fontWeight: "700",
+  },
+
+  secondaryControls: {
+    display: "flex",
+    gap: "10px",
+  },
+
+  muteButton: {
+    background: "rgba(255, 255, 255, 0.1)",
+    border: "2px solid rgba(108, 43, 221, 0.3)",
+    borderRadius: "12px",
+    padding: "15px",
+    fontSize: "20px",
+    color: "white",
+    minWidth: "60px",
     display: "flex",
     alignItems: "center",
     justifyContent: "center",
   },
 
-  volumeControl: {
+  mutedButton: {
+    background: "rgba(255, 71, 87, 0.2)",
+    borderColor: "rgba(255, 71, 87, 0.5)",
+  },
+
+  volumeUpButton: {
+    background: "rgba(108, 43, 221, 0.2)",
+    border: "2px solid rgba(108, 43, 221, 0.3)",
+    borderRadius: "12px",
+    padding: "15px",
+    fontSize: "20px",
+    color: "white",
+    minWidth: "60px",
     display: "flex",
     alignItems: "center",
-    gap: "10px",
-    width: "300px",
+    justifyContent: "center",
+  },
+
+  volumeDownButton: {
+    background: "rgba(108, 43, 221, 0.2)",
+    border: "2px solid rgba(108, 43, 221, 0.3)",
+    borderRadius: "12px",
+    padding: "15px",
+    fontSize: "20px",
+    color: "white",
+    minWidth: "60px",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+
+  volumeContainer: {
+    marginBottom: "30px",
+  },
+
+  volumeLabel: {
+    display: "flex",
+    alignItems: "center",
+    gap: "15px",
+    marginBottom: "15px",
   },
 
   volumeIcon: {
-    fontSize: "20px",
+    fontSize: "24px",
+  },
+
+  volumeText: {
+    fontSize: "14px",
+    fontWeight: "600",
+    letterSpacing: "1px",
   },
 
   volumeSlider: {
-    flex: "1",
-    height: "6px",
-    borderRadius: "3px",
-    background: "#333",
+    width: "100%",
+    height: "8px",
+    borderRadius: "4px",
+    background: "linear-gradient(to right, #6C2BDD, #9D4EDD)",
     outline: "none",
-    opacity: "0.7",
-    transition: "opacity 0.2s",
+    WebkitAppearance: "none",
   },
 
-  volumeValue: {
-    minWidth: "40px",
-    textAlign: "center",
+  statusContainer: {
+    display: "flex",
+    gap: "20px",
+    flexWrap: "wrap",
+  },
+
+  statusItem: {
+    display: "flex",
+    alignItems: "center",
+    gap: "12px",
+    background: "rgba(108, 43, 221, 0.1)",
+    padding: "15px 25px",
+    borderRadius: "12px",
+    border: "1px solid rgba(108, 43, 221, 0.2)",
+    minWidth: "200px",
+  },
+
+  statusIcon: {
+    fontSize: "20px",
+  },
+
+  statusText: {
     fontSize: "14px",
-  },
-
-  mobilePlayer: {
-    display: "none",
+    fontWeight: "600",
+    letterSpacing: "1px",
   },
 
   scheduleSection: {
     marginBottom: "40px",
+    animation: "slideUp 1s ease-out",
   },
 
   sectionTitle: {
-    fontSize: "22px",
-    fontWeight: "600",
-    marginBottom: "20px",
-    color: "#1db954",
+    fontSize: "20px",
+    fontWeight: "800",
+    marginBottom: "25px",
+    background: "linear-gradient(45deg, #6C2BDD, #9D4EDD)",
+    WebkitBackgroundClip: "text",
+    WebkitTextFillColor: "transparent",
+    letterSpacing: "2px",
+    textTransform: "uppercase",
   },
 
   scheduleGrid: {
     display: "flex",
     flexDirection: "column",
-    gap: "10px",
+    gap: "12px",
   },
 
   scheduleItem: {
     display: "flex",
     alignItems: "center",
     background: "rgba(255, 255, 255, 0.05)",
-    padding: "15px",
-    borderRadius: "10px",
-    transition: "all 0.3s",
+    padding: "20px",
+    borderRadius: "12px",
+    transition: "all 0.3s ease",
+    border: "1px solid rgba(255, 255, 255, 0.05)",
+  },
+
+  scheduleItemHover: {
+    background: "rgba(255, 255, 255, 0.08)",
+    transform: "translateX(10px)",
+    borderColor: "rgba(108, 43, 221, 0.3)",
   },
 
   scheduleTime: {
-    fontWeight: "600",
-    fontSize: "18px",
-    minWidth: "80px",
-    color: "#1db954",
+    fontWeight: "700",
+    fontSize: "20px",
+    minWidth: "90px",
+    color: "#6C2BDD",
+    textAlign: "center",
   },
 
   scheduleInfo: {
@@ -532,8 +1238,9 @@ const styles = {
   },
 
   programName: {
-    fontWeight: "600",
-    fontSize: "16px",
+    fontWeight: "700",
+    fontSize: "18px",
+    marginBottom: "5px",
   },
 
   programDJ: {
@@ -541,14 +1248,26 @@ const styles = {
     opacity: "0.8",
   },
 
-  nowPlaying: {
-    background: "#1db954",
+  nowPlayingBadge: {
+    background: "linear-gradient(45deg, #ff4757, #ff6b81)",
     color: "#000",
-    padding: "5px 10px",
+    padding: "8px 20px",
     borderRadius: "20px",
     fontSize: "12px",
-    fontWeight: "700",
+    fontWeight: "800",
     animation: "glow 2s infinite",
+    display: "flex",
+    alignItems: "center",
+    gap: "8px",
+    letterSpacing: "1px",
+  },
+
+  nowPlayingDot: {
+    width: "8px",
+    height: "8px",
+    borderRadius: "50%",
+    backgroundColor: "#000",
+    animation: "pulse 1s infinite",
   },
 
   actionButtons: {
@@ -556,48 +1275,183 @@ const styles = {
     gap: "20px",
     marginBottom: "40px",
     flexWrap: "wrap",
+    justifyContent: "center",
+    animation: "slideUp 1.1s ease-out",
+  },
+
+  actionButton: {
+    background: "linear-gradient(45deg, #6C2BDD, #9D4EDD)",
+    border: "none",
+    borderRadius: "15px",
+    padding: "20px 30px",
+    fontSize: "16px",
+    fontWeight: "700",
+    letterSpacing: "1px",
+    display: "flex",
+    alignItems: "center",
+    gap: "15px",
+    color: "white",
+    boxShadow: "0 10px 30px rgba(108, 43, 221, 0.4)",
+    minWidth: "250px",
+    justifyContent: "center",
+    textTransform: "uppercase",
   },
 
   whatsappButton: {
-    flex: "1",
-    background: "linear-gradient(45deg, #25d366, #128c7e)",
-    color: "white",
-    padding: "18px 25px",
+    background: "linear-gradient(45deg, #25D366, #128C7E)",
+    border: "none",
     borderRadius: "15px",
-    textDecoration: "none",
-    fontWeight: "600",
+    padding: "20px 30px",
     fontSize: "16px",
+    fontWeight: "700",
+    letterSpacing: "1px",
     display: "flex",
     alignItems: "center",
-    justifyContent: "center",
-    gap: "10px",
+    gap: "15px",
+    color: "white",
+    boxShadow: "0 10px 30px rgba(37, 211, 102, 0.4)",
     minWidth: "250px",
-    transition: "transform 0.3s",
+    justifyContent: "center",
+    textTransform: "uppercase",
+    textDecoration: "none",
   },
 
-  emailButton: {
-    flex: "1",
-    background: "linear-gradient(45deg, #ea4335, #d14836)",
-    color: "white",
-    padding: "18px 25px",
+  streamButton: {
+    background: "linear-gradient(45deg, #1e90ff, #3742fa)",
+    border: "none",
     borderRadius: "15px",
-    textDecoration: "none",
-    fontWeight: "600",
+    padding: "20px 30px",
     fontSize: "16px",
+    fontWeight: "700",
+    letterSpacing: "1px",
     display: "flex",
     alignItems: "center",
-    justifyContent: "center",
-    gap: "10px",
+    gap: "15px",
+    color: "white",
+    boxShadow: "0 10px 30px rgba(30, 144, 255, 0.4)",
     minWidth: "250px",
-    transition: "transform 0.3s",
+    justifyContent: "center",
+    textTransform: "uppercase",
   },
 
-  buttonIcon: {
+  actionIcon: {
+    fontSize: "24px",
+  },
+
+  actionText: {
+    fontSize: "16px",
+    fontWeight: "700",
+  },
+
+  infoGrid: {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))",
+    gap: "25px",
+    marginBottom: "40px",
+    animation: "slideUp 1.2s ease-out",
+  },
+
+  infoCard: {
+    background: "rgba(255, 255, 255, 0.05)",
+    padding: "25px",
+    borderRadius: "15px",
+    border: "1px solid rgba(108, 43, 221, 0.2)",
+  },
+
+  infoHeader: {
+    display: "flex",
+    alignItems: "center",
+    gap: "15px",
+    marginBottom: "25px",
+  },
+
+  infoIcon: {
+    fontSize: "32px",
+    background: "linear-gradient(45deg, #6C2BDD, #9D4EDD)",
+    WebkitBackgroundClip: "text",
+    WebkitTextFillColor: "transparent",
+  },
+
+  infoTitle: {
+    fontSize: "18px",
+    fontWeight: "700",
+    margin: "0",
+    letterSpacing: "1px",
+  },
+
+  infoList: {
+    display: "flex",
+    flexDirection: "column",
+    gap: "15px",
+  },
+
+  infoItem: {
+    display: "flex",
+    alignItems: "center",
+    gap: "12px",
+    fontSize: "15px",
+  },
+
+  checkIcon: {
     fontSize: "20px",
+    color: "#25D366",
+  },
+
+  connectionInfo: {
+    display: "flex",
+    flexDirection: "column",
+    gap: "12px",
+  },
+
+  connectionItem: {
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "center",
+    padding: "8px 0",
+    borderBottom: "1px solid rgba(255, 255, 255, 0.1)",
+  },
+
+  connectionLabel: {
+    fontSize: "14px",
+    opacity: "0.8",
+  },
+
+  connectionValue: {
+    fontSize: "14px",
+    fontWeight: "600",
+  },
+
+  connected: {
+    color: "#25D366",
+    fontWeight: "700",
+  },
+
+  disconnected: {
+    color: "#ff4757",
+    fontWeight: "700",
+  },
+
+  contactInfo: {
+    display: "flex",
+    flexDirection: "column",
+    gap: "15px",
+  },
+
+  contactItem: {
+    display: "flex",
+    alignItems: "center",
+    gap: "15px",
+    fontSize: "15px",
+  },
+
+  contactIcon: {
+    fontSize: "20px",
+    opacity: "0.8",
   },
 
   socialSection: {
     marginBottom: "40px",
+    animation: "slideUp 1.3s ease-out",
   },
 
   socialGrid: {
@@ -611,100 +1465,246 @@ const styles = {
     alignItems: "center",
     gap: "15px",
     background: "rgba(255, 255, 255, 0.05)",
-    padding: "15px",
-    borderRadius: "10px",
+    padding: "20px",
+    borderRadius: "12px",
     textDecoration: "none",
     color: "white",
-    transition: "all 0.3s",
+    transition: "all 0.3s ease",
+    border: "1px solid rgba(255, 255, 255, 0.05)",
+  },
+
+  socialLinkHover: {
+    background: "rgba(108, 43, 221, 0.1)",
+    transform: "translateY(-5px)",
+    borderColor: "rgba(108, 43, 221, 0.3)",
   },
 
   socialIcon: {
-    fontSize: "24px",
+    fontSize: "28px",
   },
 
-  infoSection: {
-    display: "grid",
-    gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))",
-    gap: "20px",
-    marginBottom: "40px",
-  },
-
-  infoCard: {
-    background: "rgba(255, 255, 255, 0.05)",
-    padding: "25px",
-    borderRadius: "15px",
-    border: "1px solid rgba(255, 255, 255, 0.1)",
-  },
-
-  infoTitle: {
-    fontSize: "18px",
+  socialName: {
+    fontSize: "16px",
     fontWeight: "600",
-    marginBottom: "15px",
-    color: "#1db954",
-  },
-
-  infoText: {
-    fontSize: "14px",
-    lineHeight: "1.6",
-    opacity: "0.9",
   },
 
   footer: {
-    background: "rgba(0, 0, 0, 0.8)",
-    borderTop: "1px solid rgba(255, 255, 255, 0.1)",
+    background: "rgba(10, 10, 20, 0.95)",
+    borderTop: "2px solid rgba(108, 43, 221, 0.3)",
     padding: "30px 0",
+    animation: "slideUp 1.4s ease-out",
   },
 
   footerContent: {
     maxWidth: "1200px",
     margin: "0 auto",
     padding: "0 20px",
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "center",
+    flexWrap: "wrap",
+    gap: "30px",
+  },
+
+  footerLogo: {
+    display: "flex",
+    alignItems: "center",
+    gap: "15px",
+  },
+
+  footerIcon: {
+    fontSize: "36px",
+    background: "linear-gradient(45deg, #6C2BDD, #9D4EDD)",
+    WebkitBackgroundClip: "text",
+    WebkitTextFillColor: "transparent",
+  },
+
+  footerTitle: {
+    fontSize: "20px",
+    fontWeight: "700",
+    background: "linear-gradient(45deg, #6C2BDD, #9D4EDD)",
+    WebkitBackgroundClip: "text",
+    WebkitTextFillColor: "transparent",
+  },
+
+  footerInfo: {
+    flex: "1",
     textAlign: "center",
   },
 
   footerText: {
     fontSize: "14px",
     opacity: "0.7",
-    lineHeight: "1.6",
-    marginBottom: "15px",
+    margin: "0 0 10px 0",
   },
 
-  techBadge: {
+  techInfo: {
+    display: "flex",
+    gap: "10px",
+    justifyContent: "center",
+    flexWrap: "wrap",
+  },
+
+  techItem: {
     fontSize: "12px",
     opacity: "0.5",
+  },
+
+  playerStats: {
+    display: "flex",
+    gap: "20px",
+  },
+
+  statItemFooter: {
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+    background: "rgba(108, 43, 221, 0.1)",
+    padding: "15px",
+    borderRadius: "12px",
+    minWidth: "100px",
+  },
+
+  statValueFooter: {
+    fontSize: "24px",
+    fontWeight: "800",
+    color: "#6C2BDD",
+    marginBottom: "5px",
+  },
+
+  statLabelFooter: {
+    fontSize: "12px",
+    opacity: "0.8",
+    textTransform: "uppercase",
     letterSpacing: "1px",
   },
 
   // Responsividade
   '@media (max-width: 768px)': {
-    mobilePlayer: {
-      display: "block",
-    },
-    playerWrapper: {
-      display: "none",
-    },
     headerContent: {
       flexDirection: "column",
-      gap: "15px",
-    },
-    timeDisplay: {
       textAlign: "center",
     },
-    liveSection: {
+    
+    statsContainer: {
+      justifyContent: "center",
+    },
+    
+    statBox: {
+      minWidth: "100px",
+    },
+    
+    liveContainer: {
       flexDirection: "column",
+      alignItems: "flex-start",
+    },
+    
+    spectrumContainer: {
+      height: "120px",
+    },
+    
+    controlButtons: {
+      flexDirection: "column",
+      alignItems: "stretch",
+    },
+    
+    playButton: {
+      width: "100%",
+    },
+    
+    secondaryControls: {
+      justifyContent: "center",
+    },
+    
+    statusItem: {
+      minWidth: "100%",
+    },
+    
+    scheduleItem: {
+      flexDirection: "column",
+      textAlign: "center",
       gap: "15px",
     },
+    
+    scheduleTime: {
+      minWidth: "auto",
+    },
+    
     actionButtons: {
       flexDirection: "column",
     },
+    
+    actionButton: {
+      width: "100%",
+    },
+    
     whatsappButton: {
-      minWidth: "100%",
+      width: "100%",
     },
-    emailButton: {
-      minWidth: "100%",
+    
+    streamButton: {
+      width: "100%",
     },
-    volumeControl: {
-      width: "200px",
+    
+    footerContent: {
+      flexDirection: "column",
+      textAlign: "center",
+    },
+    
+    playerStats: {
+      width: "100%",
+      justifyContent: "center",
+    },
+  },
+
+  '@media (max-width: 480px)': {
+    title: {
+      fontSize: "22px",
+    },
+    
+    statValue: {
+      fontSize: "20px",
+    },
+    
+    trackTitle: {
+      fontSize: "20px",
+    },
+    
+    playButton: {
+      padding: "15px 25px",
+    },
+    
+    actionButton: {
+      padding: "15px 25px",
+    },
+    
+    infoGrid: {
+      gridTemplateColumns: "1fr",
     },
   },
 };
+
+// Adicionar hover effects via JavaScript inline
+const addHoverEffects = () => {
+  const style = document.createElement('style');
+  style.textContent = `
+    button:hover:not(:disabled) {
+      transform: translateY(-2px) scale(1.02);
+    }
+    
+    .social-link:hover {
+      background: rgba(108, 43, 221, 0.1) !important;
+      transform: translateY(-5px) !important;
+      border-color: rgba(108, 43, 221, 0.3) !important;
+    }
+    
+    .schedule-item:hover {
+      background: rgba(255, 255, 255, 0.08) !important;
+      transform: translateX(10px) !important;
+      border-color: rgba(108, 43, 221, 0.3) !important;
+    }
+  `;
+  document.head.appendChild(style);
+};
+
+export { addHoverEffects };
