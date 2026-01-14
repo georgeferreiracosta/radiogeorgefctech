@@ -2,20 +2,23 @@ export default function App() {
   return (
     <div style={styles.container}>
       <h1 style={styles.title}>📻 Rádio George FC Tech</h1>
-      <p style={styles.live}>🔴 AO VIVO</p>
 
-      <div style={styles.playerWrapper}>
-        <iframe
-          src="https://radiogeorgefctech.ismyradio.com"
-          title="Rádio George FC Tech"
-          allow="autoplay"
-          frameBorder="0"
-          scrolling="no"
-          style={styles.iframe}
-        />
+      <div style={styles.liveWrapper}>
+        <span style={styles.liveDot}></span>
+        <span style={styles.liveText}>AO VIVO</span>
       </div>
 
-      <p style={styles.text}>
+      {/* PLAYER OFICIAL isMyRadio (EMBED) */}
+      <iframe
+        src="https://radiogeorgefctech.ismyradio.com/player?embed=1"
+        title="Rádio George FC Tech Player"
+        allow="autoplay"
+        frameBorder="0"
+        scrolling="no"
+        style={styles.player}
+      />
+
+      <p style={styles.description}>
         Música, tecnologia e informação 24 horas no ar.
       </p>
 
@@ -38,42 +41,73 @@ export default function App() {
 const styles = {
   container: {
     minHeight: "100vh",
-    background: "linear-gradient(180deg, #000, #0f2027)",
-    color: "#fff",
+    background: "linear-gradient(180deg, #050505, #0f2027)",
+    color: "#ffffff",
     display: "flex",
     flexDirection: "column",
     alignItems: "center",
     justifyContent: "center",
-    gap: "16px",
-    padding: "20px",
+    gap: "18px",
+    padding: "24px",
     textAlign: "center",
+    fontFamily: "Arial, Helvetica, sans-serif",
   },
-  title: { fontSize: "28px", fontWeight: "bold" },
-  live: { color: "red", fontWeight: "bold" },
 
-  playerWrapper: {
+  title: {
+    fontSize: "30px",
+    fontWeight: "bold",
+    letterSpacing: "1px",
+  },
+
+  liveWrapper: {
+    display: "flex",
+    alignItems: "center",
+    gap: "8px",
+  },
+
+  liveDot: {
+    width: "10px",
+    height: "10px",
+    borderRadius: "50%",
+    backgroundColor: "red",
+    boxShadow: "0 0 10px red",
+    animation: "pulse 1.2s infinite",
+  },
+
+  liveText: {
+    color: "red",
+    fontWeight: "bold",
+    fontSize: "14px",
+  },
+
+  player: {
     width: "100%",
     maxWidth: "380px",
-    height: "180px",
+    height: "120px",
     borderRadius: "12px",
-    overflow: "hidden",
+    border: "none",
     boxShadow: "0 0 20px rgba(0,0,0,0.6)",
   },
 
-  iframe: {
-    width: "100%",
-    height: "100%",
-    border: "none",
+  description: {
+    opacity: 0.85,
+    fontSize: "14px",
   },
 
-  text: { opacity: 0.85 },
   button: {
     background: "#1db954",
     color: "#000",
-    padding: "12px 24px",
+    padding: "14px 26px",
     borderRadius: "30px",
     textDecoration: "none",
     fontWeight: "bold",
+    fontSize: "14px",
+    transition: "0.2s",
   },
-  footer: { marginTop: "20px", fontSize: "12px", opacity: 0.6 },
+
+  footer: {
+    marginTop: "24px",
+    fontSize: "12px",
+    opacity: 0.6,
+  },
 };
