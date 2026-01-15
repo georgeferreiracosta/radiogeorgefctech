@@ -1,20 +1,8 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 
 export default function App() {
-  const [isPlaying, setIsPlaying] = useState(false);
-  const [volume, setVolume] = useState(50);
   const [currentTime, setCurrentTime] = useState(new Date());
   const [listeners, setListeners] = useState(245);
-  const [currentTrack, setCurrentTrack] = useState("Rádio George FC Tech");
-  const [artist, setArtist] = useState("Rádio George FC Tech");
-  const [songTitle, setSongTitle] = useState("Transmissão Ao Vivo");
-  const [bitrate, setBitrate] = useState("128kbps");
-  const [audioContext, setAudioContext] = useState(null);
-  const [connectionStatus, setConnectionStatus] = useState("Pausado");
-  const [audioError, setAudioError] = useState(null);
-  const [bassIntensity, setBassIntensity] = useState(0);
-  const [trebleIntensity, setTrebleIntensity] = useState(0);
-  const [peakFrequency, setPeakFrequency] = useState(0);
   const [showRequestModal, setShowRequestModal] = useState(false);
   const [requestForm, setRequestForm] = useState({
     name: '',
@@ -22,296 +10,52 @@ export default function App() {
     artist: '',
     message: ''
   });
-  const [realTimeTrack, setRealTimeTrack] = useState(null);
-
-  const audioRef = useRef(null);
-  const canvasRef = useRef(null);
-  const animationRef = useRef(null);
-  const analyserRef = useRef(null);
-  const sourceRef = useRef(null);
-  const dataArrayRef = useRef(null);
-
-  // Stream URL direta do Caster.fm
-  const STREAM_URL = "https://sapircast.caster.fm:19793/UYD7q?token=db0dd6f14c9c1e8b552206f015912820";
 
   // Atualizar hora atual
   useEffect(() => {
     const timer = setInterval(() => {
       setCurrentTime(new Date());
     }, 1000);
-    
+
     return () => clearInterval(timer);
   }, []);
 
   // Simular ouvintes em tempo real
   useEffect(() => {
     const listenerInterval = setInterval(() => {
-      if (isPlaying) {
-        const baseListeners = 245;
-        const hour = new Date().getHours();
-        let multiplier = 1;
-        
-        if (hour >= 8 && hour <= 10) multiplier = 1.5;
-        else if (hour >= 12 && hour <= 14) multiplier = 1.8;
-        else if (hour >= 18 && hour <= 22) multiplier = 2.2;
-        
-        const randomChange = Math.floor(Math.random() * 30) - 10;
-        const newListeners = Math.max(100, Math.floor(baseListeners * multiplier + randomChange));
-        
-        setListeners(newListeners);
-      }
+      const baseListeners = 245;
+      const hour = new Date().getHours();
+      let multiplier = 1;
+
+      if (hour >= 8 && hour <= 10) multiplier = 1.5;
+      else if (hour >= 12 && hour <= 14) multiplier = 1.8;
+      else if (hour >= 18 && hour <= 22) multiplier = 2.2;
+
+      const randomChange = Math.floor(Math.random() * 30) - 10;
+      const newListeners = Math.max(100, Math.floor(baseListeners * multiplier + randomChange));
+
+      setListeners(newListeners);
     }, 15000);
-    
+
     return () => clearInterval(listenerInterval);
-  }, [isPlaying]);
+  }, []);
 
-  // Inicializar Web Audio API quando player tocar
+  // Carregar script do Caster.fm
   useEffect(() => {
-    if (isPlaying) {
-      initAudioAnalysis();
-    } else {
-      if (animationRef.current) {
-        cancelAnimationFrame(animationRef.current);
-      }
-      if (audioContext) {
-        audioContext.suspend();
-      }
-    }
-    
+    const script = document.createElement('script');
+    script.src = '//cdn.cloud.caster.fm//widgets/embed.js';
+    script.async = true;
+    document.body.appendChild(script);
+
     return () => {
-      if (animationRef.current) {
-        cancelAnimationFrame(animationRef.current);
+      // Limpar script quando componente desmontar
+      if (document.body.contains(script)) {
+        document.body.removeChild(script);
       }
     };
-  }, [isPlaying]);
+  }, []);
 
-  const initAudioAnalysis = async () => {
-    try {
-      if (!audioContext) {
-        const AudioContext = window.AudioContext || window.webkitAudioContext;
-        const context = new AudioContext();
-        setAudioContext(context);
-        
-        const analyser = context.createAnalyser();
-        analyser.fftSize = 2048;
-        analyser.smoothingTimeConstant = 0.7;
-        analyserRef.current = analyser;
-        
-        const source = context.createMediaElementSource(audioRef.current);
-        sourceRef.current = source;
-        source.connect(analyser);
-        analyser.connect(context.destination);
-        
-        dataArrayRef.current = new Uint8Array(analyser.frequencyBinCount);
-      } else {
-        audioContext.resume();
-      }
-      
-      startSpectrumAnimation();
-    } catch (error) {
-      console.error('Erro ao inicializar análise de áudio:', error);
-      startSimulatedSpectrum();
-    }
-  };
 
-  const startSpectrumAnimation = () => {
-    if (!canvasRef.current || !analyserRef.current) {
-      startSimulatedSpectrum();
-      return;
-    }
-
-    const canvas = canvasRef.current;
-    const ctx = canvas.getContext('2d');
-    const analyser = analyserRef.current;
-    const bufferLength = analyser.frequencyBinCount;
-    const dataArray = dataArrayRef.current || new Uint8Array(bufferLength);
-
-    const draw = () => {
-      animationRef.current = requestAnimationFrame(draw);
-      analyser.getByteFrequencyData(dataArray);
-      
-      // Calcular intensidades
-      const bass = calculateFrequencyIntensity(dataArray, 0, 50);
-      const treble = calculateFrequencyIntensity(dataArray, 100, 255);
-      const peak = findPeakFrequency(dataArray);
-      
-      setBassIntensity(bass);
-      setTrebleIntensity(treble);
-      setPeakFrequency(peak);
-      
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-      drawVUMeter(ctx, canvas, dataArray);
-    };
-    
-    draw();
-  };
-
-  const calculateFrequencyIntensity = (data, start, end) => {
-    let sum = 0;
-    for (let i = start; i < end && i < data.length; i++) {
-      sum += data[i];
-    }
-    return sum / (end - start) / 255;
-  };
-
-  const findPeakFrequency = (data) => {
-    let peak = 0;
-    let peakValue = 0;
-    for (let i = 0; i < data.length; i++) {
-      if (data[i] > peakValue) {
-        peakValue = data[i];
-        peak = i;
-      }
-    }
-    return peak;
-  };
-
-  const drawVUMeter = (ctx, canvas, data) => {
-    const width = canvas.width;
-    const height = canvas.height;
-    const barCount = 64;
-    const barWidth = width / barCount;
-    const spacing = barWidth * 0.1;
-    const effectiveWidth = barWidth - spacing;
-    
-    for (let i = 0; i < barCount; i++) {
-      const dataIndex = Math.floor((i / barCount) * data.length);
-      const barHeight = (data[dataIndex] / 255) * height;
-      const x = i * barWidth + spacing / 2;
-      const y = height - barHeight;
-      
-      // Determinar cor baseada na altura (LED style)
-      let color;
-      if (barHeight < height * 0.3) {
-        color = '#25D366'; // Verde - baixa intensidade
-      } else if (barHeight < height * 0.7) {
-        color = '#FFD93D'; // Amarelo - média intensidade
-      } else {
-        color = '#FF4757'; // Vermelho - alta intensidade
-      }
-      
-      // Desenhar barra com gradiente
-      const gradient = ctx.createLinearGradient(0, y, 0, height);
-      gradient.addColorStop(0, color);
-      gradient.addColorStop(1, lightenColor(color, 30));
-      
-      ctx.fillStyle = gradient;
-      ctx.fillRect(x, y, effectiveWidth, barHeight);
-      
-      // Brilho no topo
-      ctx.fillStyle = 'rgba(255, 255, 255, 0.3)';
-      ctx.fillRect(x, y, effectiveWidth, 2);
-      
-      // Sombra na base
-      ctx.fillStyle = 'rgba(0, 0, 0, 0.2)';
-      ctx.fillRect(x, height - 1, effectiveWidth, 1);
-    }
-  };
-
-  const startSimulatedSpectrum = () => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    
-    const ctx = canvas.getContext('2d');
-    const bufferLength = 64;
-    const simulatedData = new Uint8Array(bufferLength);
-    let time = 0;
-    
-    const draw = () => {
-      animationRef.current = requestAnimationFrame(draw);
-      time += 0.03;
-      
-      // Gerar dados simulados para VU meter
-      for (let i = 0; i < bufferLength; i++) {
-        const frequency = i / bufferLength;
-        const wave1 = Math.sin(time * 1.5 + frequency * 10) * 60;
-        const wave2 = Math.sin(time * 2 + frequency * 15) * 40;
-        const base = 30 + (1 - frequency) * 40;
-        const random = Math.random() * 15;
-        simulatedData[i] = Math.min(255, Math.max(0, base + wave1 + wave2 + random));
-      }
-      
-      // Calcular intensidades
-      const bass = calculateFrequencyIntensity(simulatedData, 0, 20);
-      const treble = calculateFrequencyIntensity(simulatedData, 40, 64);
-      
-      setBassIntensity(bass);
-      setTrebleIntensity(treble);
-      
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-      drawVUMeter(ctx, canvas, simulatedData);
-    };
-    
-    draw();
-  };
-
-  const lightenColor = (color, percent) => {
-    const num = parseInt(color.replace('#', ''), 16);
-    const amt = Math.round(2.55 * percent);
-    const R = (num >> 16) + amt;
-    const G = (num >> 8 & 0x00FF) + amt;
-    const B = (num & 0x0000FF) + amt;
-    
-    return '#' + (
-      0x1000000 +
-      (R < 255 ? R < 1 ? 0 : R : 255) * 0x10000 +
-      (G < 255 ? G < 1 ? 0 : G : 255) * 0x100 +
-      (B < 255 ? B < 1 ? 0 : B : 255)
-    ).toString(16).slice(1);
-  };
-
-  // Controle do player
-  const togglePlay = async () => {
-    if (!isPlaying) {
-      try {
-        setConnectionStatus("Conectando...");
-        
-        // Configurar áudio
-        audioRef.current.src = STREAM_URL;
-        audioRef.current.volume = volume / 100;
-        audioRef.current.crossOrigin = "anonymous";
-        
-        // Tentar tocar
-        await audioRef.current.play();
-        
-        setIsPlaying(true);
-        setConnectionStatus("Tocando");
-        setAudioError(null);
-        
-        // Atualizar informações da rádio
-        setArtist("Rádio George FC Tech");
-        setSongTitle("Transmissão Ao Vivo");
-        setCurrentTrack("Rádio George FC Tech - Transmissão Ao Vivo");
-        
-      } catch (error) {
-        console.error('Erro ao reproduzir:', error);
-        setAudioError("Não foi possível conectar à transmissão. Tente novamente.");
-        setConnectionStatus("Erro");
-        setIsPlaying(false);
-        
-        // Iniciar spectrum simulado
-        startSimulatedSpectrum();
-      }
-    } else {
-      audioRef.current.pause();
-      setIsPlaying(false);
-      setConnectionStatus("Pausado");
-    }
-  };
-
-  const handleVolumeChange = (e) => {
-    const newVolume = parseInt(e.target.value);
-    setVolume(newVolume);
-    if (audioRef.current) {
-      audioRef.current.volume = newVolume / 100;
-    }
-  };
-
-  const toggleMute = () => {
-    if (audioRef.current) {
-      audioRef.current.muted = !audioRef.current.muted;
-    }
-  };
 
   const formatTime = (date) => {
     return date.toLocaleTimeString('pt-BR', {
@@ -392,69 +136,10 @@ ${formData.message ? `💬 *Mensagem/Dedicação:*\n${formData.message}\n` : ''}
     return "#FF6B6B";
   };
 
-  // Buscar informações da música em tempo real
-  const fetchRealTimeTrack = async () => {
-    try {
-      // Endpoint do Icecast/Shoutcast para informações da transmissão
-      const response = await fetch('https://sapircast.caster.fm:19793/status-json.xsl');
-      const data = await response.json();
 
-      if (data.icestats && data.icestats.source && data.icestats.source.title) {
-        const currentTrack = data.icestats.source.title;
-        const [artist, title] = currentTrack.split(' - ');
-
-        setRealTimeTrack({
-          artist: artist || 'Rádio George FC Tech',
-          title: title || currentTrack,
-          fullTitle: currentTrack,
-          genre: 'Ao Vivo',
-          bitrate: data.icestats.source.bitrate || '128kbps'
-        });
-
-        // Atualizar informações de exibição
-        setArtist(artist || 'Rádio George FC Tech');
-        setSongTitle(title || currentTrack);
-        setCurrentTrack(currentTrack);
-        setBitrate(data.icestats.source.bitrate || '128kbps');
-      }
-    } catch (error) {
-      console.error('Erro ao buscar informações da música:', error);
-      // Manter informações padrão da rádio
-      setRealTimeTrack({
-        artist: 'Rádio George FC Tech',
-        title: 'Transmissão Ao Vivo',
-        fullTitle: 'Rádio George FC Tech - Transmissão Ao Vivo',
-        genre: 'Ao Vivo',
-        bitrate: '128kbps'
-      });
-    }
-  };
-
-  // Atualizar informações da música em tempo real
-  useEffect(() => {
-    fetchRealTimeTrack();
-    const interval = setInterval(fetchRealTimeTrack, 30000); // Atualizar a cada 30 segundos
-    return () => clearInterval(interval);
-  }, []);
 
   return (
     <div style={styles.container}>
-      {/* Elemento de áudio oculto */}
-      <audio
-        ref={audioRef}
-        crossOrigin="anonymous"
-        preload="none"
-        style={{ display: 'none' }}
-        onError={(e) => {
-          console.error('Erro no áudio:', e);
-          setAudioError("Erro na transmissão de áudio");
-          setConnectionStatus("Erro");
-        }}
-        onCanPlay={() => {
-          setConnectionStatus("Pronto");
-          setAudioError(null);
-        }}
-      />
 
       {/* Header Spotify-style */}
       <header style={styles.header}>
@@ -494,10 +179,9 @@ ${formData.message ? `💬 *Mensagem/Dedicação:*\n${formData.message}\n` : ''}
                 <div style={styles.statLabel}>STATUS</div>
                 <div style={{
                   ...styles.statValue,
-                  color: connectionStatus === "Tocando" ? "#1DB954" : 
-                         connectionStatus === "Conectando..." ? "#FFD93D" : "#FF6B6B"
+                  color: "#1DB954"
                 }}>
-                  {connectionStatus}
+                  AO VIVO
                 </div>
               </div>
             </div>
@@ -506,160 +190,11 @@ ${formData.message ? `💬 *Mensagem/Dedicação:*\n${formData.message}\n` : ''}
       </header>
 
       <main style={styles.main}>
-        {/* Player Principal - Spotify Style */}
+        {/* Player Caster.fm */}
         <div style={styles.playerContainer}>
-          {/* Informações da Música */}
-          <div style={styles.trackInfoContainer}>
-            <div style={styles.albumArtPlaceholder}>
-              <div style={styles.albumArtIcon}>📻</div>
-              <div style={styles.albumArtGlow}></div>
-            </div>
-            
-            <div style={styles.trackDetails}>
-              <div style={styles.trackTitle}>
-                {realTimeTrack?.title || "Transmissão Ao Vivo"}
-              </div>
-              <div style={styles.trackArtist}>
-                {realTimeTrack?.artist || "Rádio George FC Tech"}
-              </div>
-
-              <div style={styles.fileName}>
-                <span style={styles.fileIcon}>🔴</span>
-                <span style={styles.fileNameText}>
-                  {realTimeTrack?.fullTitle || "stream_ao_vivo.mp3"}
-                </span>
-              </div>
-
-              <div style={styles.trackMeta}>
-                <span style={styles.genreTag}>
-                  {realTimeTrack?.genre || "Ao Vivo"}
-                </span>
-                <span style={styles.bitrateTag}>⚡ {bitrate}</span>
-                <span style={styles.liveTag}>🔴 AO VIVO</span>
-              </div>
-            </div>
+          <div data-type="newStreamPlayer" data-publicToken="fe202753-ba40-4cbd-9b08-c9678f206ccb" data-theme="dark" data-color="131212" data-channelId="" data-rendered="false" className="cstrEmbed">
+            <a href="https://www.caster.fm">Shoutcast Hosting</a> <a href="https://www.caster.fm">Stream Hosting</a> <a href="https://www.caster.fm">Radio Server Hosting</a>
           </div>
-
-          {/* VU Meter */}
-          <div style={styles.vuContainer}>
-            <canvas
-              ref={canvasRef}
-              width={800}
-              height={60}
-              style={styles.vuCanvas}
-            />
-          </div>
-
-          {/* Controles do Player */}
-          <div style={styles.controlsContainer}>
-            {/* Botões de controle */}
-            <div style={styles.playbackControls}>
-              <button 
-                onClick={togglePlay}
-                style={styles.playButton}
-                title={isPlaying ? "Pausar" : "Tocar"}
-              >
-                <span style={styles.playIcon}>
-                  {isPlaying ? "⏸️" : "▶️"}
-                </span>
-              </button>
-            </div>
-
-            {/* Controle de volume */}
-            <div style={styles.volumeContainer}>
-              <button 
-                onClick={toggleMute}
-                style={styles.volumeButton}
-                title={audioRef.current?.muted ? "Ativar som" : "Mutar"}
-              >
-                <span style={styles.volumeIcon}>
-                  {audioRef.current?.muted ? "🔇" : volume > 50 ? "🔊" : "🔈"}
-                </span>
-              </button>
-              
-              <div style={styles.volumeSliderContainer}>
-                <input
-                  type="range"
-                  min="0"
-                  max="100"
-                  value={volume}
-                  onChange={handleVolumeChange}
-                  style={styles.volumeSlider}
-                  aria-label="Volume"
-                />
-                <div style={styles.volumeBarBackground}>
-                  <div style={{
-                    ...styles.volumeBarFill,
-                    width: `${volume}%`
-                  }}></div>
-                </div>
-              </div>
-              
-              <span style={styles.volumeValue}>{volume}%</span>
-            </div>
-          </div>
-
-          {/* Indicadores de Áudio */}
-          <div style={styles.audioIndicators}>
-            <div style={styles.indicator}>
-              <div style={styles.indicatorLabel}>
-                <span style={styles.indicatorIcon}>🔴</span>
-                <span>BAIXO</span>
-              </div>
-              <div style={styles.indicatorBar}>
-                <div style={{
-                  ...styles.indicatorFill,
-                  width: `${bassIntensity * 100}%`,
-                  background: 'linear-gradient(90deg, #FF4757, #FF6B6B)'
-                }}></div>
-              </div>
-              <div style={styles.indicatorValue}>{Math.floor(bassIntensity * 100)}%</div>
-            </div>
-            
-            <div style={styles.indicator}>
-              <div style={styles.indicatorLabel}>
-                <span style={styles.indicatorIcon}>🟡</span>
-                <span>MÉDIO</span>
-              </div>
-              <div style={styles.indicatorBar}>
-                <div style={{
-                  ...styles.indicatorFill,
-                  width: `${((bassIntensity + trebleIntensity) / 2 * 100)}%`,
-                  background: 'linear-gradient(90deg, #FFD93D, #FFA500)'
-                }}></div>
-              </div>
-              <div style={styles.indicatorValue}>{Math.floor(((bassIntensity + trebleIntensity) / 2 * 100))}%</div>
-            </div>
-            
-            <div style={styles.indicator}>
-              <div style={styles.indicatorLabel}>
-                <span style={styles.indicatorIcon}>🟢</span>
-                <span>AGUDO</span>
-              </div>
-              <div style={styles.indicatorBar}>
-                <div style={{
-                  ...styles.indicatorFill,
-                  width: `${trebleIntensity * 100}%`,
-                  background: 'linear-gradient(90deg, #25D366, #1DB954)'
-                }}></div>
-              </div>
-              <div style={styles.indicatorValue}>{Math.floor(trebleIntensity * 100)}%</div>
-            </div>
-          </div>
-
-          {/* Error Message */}
-          {audioError && (
-            <div style={styles.errorMessage}>
-              <span style={styles.errorIcon}>⚠️</span>
-              <span style={styles.errorText}>{audioError}</span>
-              <button 
-                onClick={togglePlay}
-                style={styles.retryButton}
-              >
-                Tentar Novamente
-              </button>
-            </div>
-          )}
         </div>
 
         {/* Informações Ao Vivo */}
@@ -667,52 +202,45 @@ ${formData.message ? `💬 *Mensagem/Dedicação:*\n${formData.message}\n` : ''}
           <h3 style={styles.playlistTitle}>🎵 TRANSMISSÃO AO VIVO</h3>
 
           <div style={styles.liveTrackContainer}>
-            {realTimeTrack ? (
-              <div style={styles.liveTrackCard}>
-                <div style={styles.liveTrackHeader}>
-                  <div style={styles.liveIndicator}>
-                    <span style={styles.liveDot}></span>
-                    <span style={styles.liveText}>AO VIVO AGORA</span>
-                  </div>
-                  <div style={styles.lastUpdate}>
-                    Atualizado em tempo real
-                  </div>
+            <div style={styles.liveTrackCard}>
+              <div style={styles.liveTrackHeader}>
+                <div style={styles.liveIndicator}>
+                  <span style={styles.liveDot}></span>
+                  <span style={styles.liveText}>AO VIVO AGORA</span>
                 </div>
-
-                <div style={styles.liveTrackInfo}>
-                  <div style={styles.liveTrackTitle}>
-                    {realTimeTrack.title}
-                  </div>
-                  <div style={styles.liveTrackArtist}>
-                    {realTimeTrack.artist}
-                  </div>
-                  <div style={styles.liveTrackDetails}>
-                    <span style={styles.liveTrackGenre}>{realTimeTrack.genre}</span>
-                    <span style={styles.liveTrackBitrate}>⚡ {realTimeTrack.bitrate}</span>
-                  </div>
-                </div>
-
-                <div style={styles.liveTrackMeta}>
-                  <div style={styles.metaItem}>
-                    <span style={styles.metaIcon}>🎵</span>
-                    <span style={styles.metaText}>Transmissão ao vivo 24/7</span>
-                  </div>
-                  <div style={styles.metaItem}>
-                    <span style={styles.metaIcon}>📡</span>
-                    <span style={styles.metaText}>Fonte: sapircast.caster.fm</span>
-                  </div>
-                  <div style={styles.metaItem}>
-                    <span style={styles.metaIcon}>🎧</span>
-                    <span style={styles.metaText}>Rádio George FC Tech</span>
-                  </div>
+                <div style={styles.lastUpdate}>
+                  Transmissão 24/7
                 </div>
               </div>
-            ) : (
-              <div style={styles.loadingCard}>
-                <div style={styles.loadingSpinner}></div>
-                <div style={styles.loadingText}>Conectando à transmissão ao vivo...</div>
+
+              <div style={styles.liveTrackInfo}>
+                <div style={styles.liveTrackTitle}>
+                  Transmissão Ao Vivo
+                </div>
+                <div style={styles.liveTrackArtist}>
+                  Rádio George FC Tech
+                </div>
+                <div style={styles.liveTrackDetails}>
+                  <span style={styles.liveTrackGenre}>Ao Vivo</span>
+                  <span style={styles.liveTrackBitrate}>⚡ 128kbps</span>
+                </div>
               </div>
-            )}
+
+              <div style={styles.liveTrackMeta}>
+                <div style={styles.metaItem}>
+                  <span style={styles.metaIcon}>🎵</span>
+                  <span style={styles.metaText}>Transmissão ao vivo 24/7</span>
+                </div>
+                <div style={styles.metaItem}>
+                  <span style={styles.metaIcon}>📡</span>
+                  <span style={styles.metaText}>Fonte: sapircast.caster.fm</span>
+                </div>
+                <div style={styles.metaItem}>
+                  <span style={styles.metaIcon}>🎧</span>
+                  <span style={styles.metaText}>Rádio George FC Tech</span>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
 
@@ -738,7 +266,7 @@ ${formData.message ? `💬 *Mensagem/Dedicação:*\n${formData.message}\n` : ''}
             <div style={styles.statCard}>
               <div style={styles.statCardIcon}>📶</div>
               <div style={styles.statCardContent}>
-                <div style={styles.statCardValue}>{bitrate}</div>
+                <div style={styles.statCardValue}>128kbps</div>
                 <div style={styles.statCardLabel}>Qualidade</div>
                 <div style={styles.statCardProgress}>
                   <div style={{
@@ -882,10 +410,10 @@ ${formData.message ? `💬 *Mensagem/Dedicação:*\n${formData.message}\n` : ''}
 
               <div style={styles.footerStat}>
                 <span style={styles.footerStatIcon}>
-                  {isPlaying ? "▶️" : "⏸️"}
+                  ▶️
                 </span>
                 <span style={styles.footerStatValue}>
-                  {isPlaying ? "AO VIVO" : "PAUSADO"}
+                  AO VIVO
                 </span>
               </div>
 
